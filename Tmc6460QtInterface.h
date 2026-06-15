@@ -112,7 +112,6 @@ private:
     static constexpr quint32 GDRV_OFF_VALUE = 0x80003431UL;
     static constexpr quint32 GDRV_ON_VALUE  = 0x80013431UL;
 
-    // Full-register value observed from your working Arduino configuration.
     static constexpr quint32 MOTOR_MOTION_VELOCITY_VALUE = 0x0000E586UL;
 
     QSerialPort serialPort;

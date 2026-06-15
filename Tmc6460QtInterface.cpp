@@ -34,13 +34,11 @@ bool Tmc6460QtInterface::openPort(const QString &portName, qint32 baudRate)
         return false;
     }
 
-    // Important for Arduino Due USB CDC bridge.
     serialPort.setDataTerminalReady(true);
     serialPort.setRequestToSend(false);
 
     log(QString("Opened %1 at %2 baud").arg(portName).arg(baudRate));
 
-    // Arduino resets/restarts after PC opens USB serial. Wait before sending raw TMC frames.
     QThread::msleep(STARTUP_DELAY_MS);
     clearRx();
 
@@ -102,7 +100,6 @@ bool Tmc6460QtInterface::initializeMotor()
         QThread::msleep(WRITE_SETTLE_MS);
     }
 
-    // Same final safe state as your Arduino code: gate driver disabled after config.
     if (!setDriverEnable(false))
     {
         setBusy(false);
@@ -392,7 +389,6 @@ bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
 
     quickCheckDriverEvent();
 
-    // Full-register torque/flux target format used by your Arduino configuration:
     // upper 16 bits = torque target, lower 16 bits = flux target.
     const quint32 rawValue = (static_cast<quint32>(static_cast<quint16>(targetTorque)) << 16);
     const bool ok = writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
