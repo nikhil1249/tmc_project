@@ -297,8 +297,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
             while (value != 0)
             {
                 value = (value > 0)
-                ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
-                : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
+                    ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
+                    : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
 
                 if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET SOFT_STOP"))
                 {
@@ -321,8 +321,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
     while (value != 0)
     {
         value = (value > 0)
-        ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
-        : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
+            ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
+            : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
 
         if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET RAMP_TO_ZERO"))
         {
@@ -341,8 +341,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
     while (value != targetVelocity)
     {
         value = (targetVelocity > 0)
-        ? qMin<qint32>(targetVelocity, value + SAFE_REVERSE_RAMP_STEP)
-        : qMax<qint32>(targetVelocity, value - SAFE_REVERSE_RAMP_STEP);
+            ? qMin<qint32>(targetVelocity, value + SAFE_REVERSE_RAMP_STEP)
+            : qMax<qint32>(targetVelocity, value - SAFE_REVERSE_RAMP_STEP);
 
         if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET RAMP_TO_TARGET"))
         {

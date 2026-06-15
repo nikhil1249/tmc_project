@@ -1,89 +1,45 @@
 #include "mainwindow.h"
 
-#include <QApplication>
 #include <QDateTime>
-#include <QFont>
-#include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
-#include <QIntValidator>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QScrollBar>
-#include <QSerialPortInfo>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
 #include <QTextEdit>
+#include <QStyle>
 #include <QVBoxLayout>
-#include <QWidget>
+#include <QtGlobal>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent),
-    serial(new QSerialPort(this)),
-    statusTimer(new QTimer(this)),
-    reverseDelayTimer(new QTimer(this)),
-    initialized(false),
-    currentVelocity(0),
-    pendingVelocity(0)
+    : QMainWindow(parent)
 {
     buildUi();
-    applyStyle();
-
-    connect(serial, &QSerialPort::readyRead,
-            this, &MainWindow::readSerialData);
-
-    connect(serial, &QSerialPort::errorOccurred,
-            this, &MainWindow::handleSerialError);
-
-    connect(statusTimer, &QTimer::timeout,
-            this, &MainWindow::pollStatus);
-
-    connect(reverseDelayTimer, &QTimer::timeout,
-            this, &MainWindow::sendPendingVelocityAfterDelay);
-
-    reverseDelayTimer->setSingleShot(true);
-
-    setStatusDisconnected();
-    setErrorState(false, "No error");
-
-    setWindowTitle("TMC6460 Motor Control");
-    resize(1280, 720);
-}
-
-MainWindow::~MainWindow()
-{
-    if (serial->isOpen()) {
-        sendCommand("VEL 0");
-        serial->close();
-    }
+    applyStyleSheet();
+    setupConnections();
+    setConnectedUi(false);
 }
 
 void MainWindow::buildUi()
 {
+    setWindowTitle("TMC6460 Motor Control");
+    resize(1120, 760);
+
     QWidget *central = new QWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(central);
+    mainLayout->setContentsMargins(16, 16, 16, 16);
+    mainLayout->setSpacing(12);
 
-    mainLayout->setContentsMargins(18, 16, 18, 16);
-    mainLayout->setSpacing(14);
+    QLabel *title = new QLabel("TMC6460 Motor Control");
+    title->setObjectName("titleLabel");
+    mainLayout->addWidget(title);
 
-    QLabel *titleLabel = new QLabel("TMC6460 Motor Control");
-    QFont titleFont;
-    titleFont.setPointSize(22);
-    titleFont.setBold(true);
-    titleLabel->setFont(titleFont);
-    titleLabel->setMinimumHeight(38);
-
-    mainLayout->addWidget(titleLabel);
     mainLayout->addWidget(createConnectionGroup());
-
-    QHBoxLayout *statusEmergencyLayout = new QHBoxLayout;
-    statusEmergencyLayout->setSpacing(14);
-    statusEmergencyLayout->addWidget(createStatusGroup(), 3);
-    statusEmergencyLayout->addWidget(createEmergencyGroup(), 1);
-
-    mainLayout->addLayout(statusEmergencyLayout);
+    mainLayout->addWidget(createStatusAndEstopRow());
     mainLayout->addWidget(createTorqueGroup());
     mainLayout->addWidget(createVelocityGroup());
     mainLayout->addWidget(createLogGroup(), 1);
@@ -91,746 +47,561 @@ void MainWindow::buildUi()
     setCentralWidget(central);
 }
 
-QGroupBox *MainWindow::createConnectionGroup()
+QWidget *MainWindow::createConnectionGroup()
 {
     QGroupBox *group = new QGroupBox("Connection");
     QHBoxLayout *layout = new QHBoxLayout(group);
+    layout->setContentsMargins(16, 22, 16, 16);
+    layout->setSpacing(10);
 
-    layout->setContentsMargins(14, 22, 14, 14);
+    layout->addWidget(new QLabel("Bridge COM Port:"));
+
+    portEdit = new QLineEdit(DEFAULT_COM_PORT);
+    portEdit->setMaximumWidth(160);
+    layout->addWidget(portEdit);
+
+    connectButton = new QPushButton("Connect + Initialize");
+    connectButton->setMinimumWidth(190);
+    layout->addWidget(connectButton);
+
+    layout->addStretch(1);
+    return group;
+}
+
+QWidget *MainWindow::createStatusAndEstopRow()
+{
+    QWidget *row = new QWidget;
+    QHBoxLayout *layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    QLabel *portLabel = new QLabel("Bridge COM Port:");
-    portEdit = new QLineEdit;
-    portEdit->setText("COM6");
-    portEdit->setFixedWidth(130);
-    portEdit->setMinimumHeight(34);
+    QWidget *chipStatus = createChipStatusGroup();
+    QWidget *estopPanel = createEstopPanel();
 
-    connectInitButton = new QPushButton("Connect + Initialize");
-    connectInitButton->setMinimumHeight(36);
-    connectInitButton->setFixedWidth(190);
+    layout->addWidget(chipStatus, 3);
+    layout->addWidget(estopPanel, 1);
 
-    layout->addWidget(portLabel);
-    layout->addWidget(portEdit);
-    layout->addWidget(connectInitButton);
-    layout->addStretch(1);
-
-    connect(connectInitButton, &QPushButton::clicked,
-            this, &MainWindow::connectAndInitialize);
-
-    return group;
+    return row;
 }
 
-QGroupBox *MainWindow::createStatusGroup()
+QWidget *MainWindow::createChipStatusGroup()
 {
     QGroupBox *group = new QGroupBox("Chip Status");
+    group->setMinimumHeight(135);
+
     QGridLayout *layout = new QGridLayout(group);
-
-    layout->setContentsMargins(14, 26, 14, 18);
+    layout->setContentsMargins(16, 24, 16, 16);
     layout->setHorizontalSpacing(14);
-    layout->setVerticalSpacing(16);
+    layout->setVerticalSpacing(10);
 
-    QLabel *chipIdLabel = new QLabel("Chip ID:");
+    layout->addWidget(new QLabel("Chip ID:"), 0, 0);
     chipIdValueLabel = new QLabel("----");
-    chipIdValueLabel->setObjectName("chipValue");
+    chipIdValueLabel->setObjectName("blueValueLabel");
+    layout->addWidget(chipIdValueLabel, 0, 1);
 
-    QLabel *statusLabel = new QLabel("Status:");
-    statusLampLabel = new QLabel;
-    statusLampLabel->setFixedSize(13, 13);
+    layout->addWidget(new QLabel("Status:"), 0, 2);
+    statusValueLabel = new QLabel("Disconnected");
+    statusValueLabel->setObjectName("statusBad");
+    layout->addWidget(statusValueLabel, 0, 3);
 
-    statusTextLabel = new QLabel("Disconnected");
-    statusTextLabel->setMinimumWidth(140);
-    statusTextLabel->setAlignment(Qt::AlignCenter);
-    statusTextLabel->setObjectName("statusText");
-
-    QLabel *errorLabel = new QLabel("Error:");
-    errorLampLabel = new QLabel;
-    errorLampLabel->setFixedSize(13, 13);
+    layout->addWidget(new QLabel("Error:"), 1, 0);
+    errorDotLabel = new QLabel("●");
+    errorDotLabel->setObjectName("dotGreen");
+    layout->addWidget(errorDotLabel, 1, 1);
 
     errorTextLabel = new QLabel("No error");
+    errorTextLabel->setWordWrap(true);
+    layout->addWidget(errorTextLabel, 1, 2, 1, 2);
 
-    layout->addWidget(chipIdLabel,       0, 0);
-    layout->addWidget(chipIdValueLabel,  0, 1);
-    layout->addWidget(statusLabel,       0, 2);
-    layout->addWidget(statusLampLabel,   0, 3);
-    layout->addWidget(statusTextLabel,   0, 4);
-
-    layout->addWidget(errorLabel,        1, 0);
-    layout->addWidget(errorLampLabel,    1, 1);
-    layout->addWidget(errorTextLabel,    1, 2, 1, 3);
-
-    layout->setColumnStretch(5, 1);
-
+    layout->setColumnStretch(4, 1);
     return group;
 }
 
-QGroupBox *MainWindow::createEmergencyGroup()
+QWidget *MainWindow::createEstopPanel()
 {
     QGroupBox *group = new QGroupBox("Emergency Stop");
-    QVBoxLayout *layout = new QVBoxLayout(group);
+    group->setMinimumHeight(135);
 
-    layout->setContentsMargins(16, 26, 16, 18);
+    QVBoxLayout *layout = new QVBoxLayout(group);
+    layout->setContentsMargins(16, 26, 16, 16);
+    layout->setSpacing(8);
 
     estopButton = new QPushButton("E-STOP");
     estopButton->setObjectName("estopButton");
     estopButton->setMinimumHeight(82);
     estopButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
     layout->addWidget(estopButton);
 
-    connect(estopButton, &QPushButton::clicked,
-            this, &MainWindow::emergencyStop);
-
     return group;
 }
 
-QGroupBox *MainWindow::createTorqueGroup()
+QWidget *MainWindow::createTorqueGroup()
 {
     QGroupBox *group = new QGroupBox("Torque Control");
-    QVBoxLayout *main = new QVBoxLayout(group);
-
-    main->setContentsMargins(14, 24, 14, 14);
-    main->setSpacing(10);
-
-    QHBoxLayout *top = new QHBoxLayout;
-    top->setSpacing(10);
+    QGridLayout *layout = new QGridLayout(group);
+    layout->setContentsMargins(16, 24, 16, 16);
+    layout->setHorizontalSpacing(12);
+    layout->setVerticalSpacing(12);
 
     torqueMinSpin = new QSpinBox;
+    torqueMinSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
+    torqueMinSpin->setValue(DEFAULT_TORQUEMIN_VALUE);
+    torqueMinSpin->setMinimumWidth(130);
+
     torqueMaxSpin = new QSpinBox;
+    torqueMaxSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
+    torqueMaxSpin->setValue(DEFAULT_TORQUEMAX_VALUE);
+    torqueMaxSpin->setMinimumWidth(130);
+
     torqueDirectSpin = new QSpinBox;
-
-    torqueMinSpin->setRange(-1000000, 1000000);
-    torqueMaxSpin->setRange(-1000000, 1000000);
-    torqueDirectSpin->setRange(-1000000, 1000000);
-
-    torqueMinSpin->setValue(0);
-    torqueMaxSpin->setValue(3000);
+    torqueDirectSpin->setRange(DEFAULT_TORQUEMIN_VALUE, DEFAULT_TORQUEMAX_VALUE);
     torqueDirectSpin->setValue(0);
-
-    torqueMinSpin->setFixedWidth(120);
-    torqueMaxSpin->setFixedWidth(120);
-    torqueDirectSpin->setFixedWidth(150);
-
-    torqueMinSpin->setMinimumHeight(32);
-    torqueMaxSpin->setMinimumHeight(32);
-    torqueDirectSpin->setMinimumHeight(32);
+    torqueDirectSpin->setMinimumWidth(150);
+    torqueDirectSpin->setKeyboardTracking(false);   // valueChanged is emitted after Enter/focus-out, not on every digit
 
     applyTorqueButton = new QPushButton("Apply Torque");
-    applyTorqueButton->setMinimumHeight(36);
-    applyTorqueButton->setFixedWidth(140);
-
-    top->addWidget(new QLabel("Min:"));
-    top->addWidget(torqueMinSpin);
-    top->addSpacing(8);
-    top->addWidget(new QLabel("Max:"));
-    top->addWidget(torqueMaxSpin);
-    top->addSpacing(8);
-    top->addWidget(new QLabel("Direct Value:"));
-    top->addStretch(1);
-    top->addWidget(torqueDirectSpin);
-    top->addWidget(new QLabel("RAW"));
-    top->addWidget(applyTorqueButton);
-
-    QHBoxLayout *bottom = new QHBoxLayout;
-    bottom->setSpacing(14);
+    applyTorqueButton->setMinimumWidth(130);
 
     torqueSlider = new QSlider(Qt::Horizontal);
-    torqueSlider->setRange(0, 3000);
+    torqueSlider->setRange(DEFAULT_TORQUEMIN_VALUE, DEFAULT_TORQUEMAX_VALUE);
     torqueSlider->setValue(0);
-    torqueSlider->setMinimumHeight(34);
+    torqueSlider->setTracking(true);      // display live value while sliding
+    torqueSlider->setTickPosition(QSlider::TicksBelow);
+    torqueSlider->setTickInterval(250);
 
-    QLabel *valueText = new QLabel("Value:");
     torqueValueLabel = new QLabel("0");
-    torqueValueLabel->setObjectName("valueNumber");
-    torqueValueLabel->setMinimumWidth(70);
+    torqueValueLabel->setObjectName("blueValueLabel");
+    torqueValueLabel->setMinimumWidth(120);
 
-    bottom->addWidget(torqueSlider, 1);
-    bottom->addWidget(valueText);
-    bottom->addWidget(torqueValueLabel);
+    layout->addWidget(new QLabel("Min:"), 0, 0);
+    layout->addWidget(torqueMinSpin, 0, 1);
+    layout->addWidget(new QLabel("Max:"), 0, 2);
+    layout->addWidget(torqueMaxSpin, 0, 3);
+    layout->addWidget(new QLabel("Direct Value:"), 0, 4);
+    layout->addWidget(torqueDirectSpin, 0, 5);
+    layout->addWidget(new QLabel("RAW"), 0, 6);
+    layout->addWidget(applyTorqueButton, 0, 7);
 
-    main->addLayout(top);
-    main->addLayout(bottom);
+    layout->addWidget(torqueSlider, 1, 0, 1, 6);
+    layout->addWidget(new QLabel("Value:"), 1, 6);
+    layout->addWidget(torqueValueLabel, 1, 7);
 
-    connect(torqueSlider, &QSlider::valueChanged,
-            this, &MainWindow::onTorqueSliderChanged);
-
-    connect(torqueDirectSpin, qOverload<int>(&QSpinBox::valueChanged),
-            torqueSlider, &QSlider::setValue);
-
-    connect(applyTorqueButton, &QPushButton::clicked,
-            this, &MainWindow::applyTorque);
-
-    connect(torqueMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this]() {
-        torqueSlider->setRange(torqueMinSpin->value(), torqueMaxSpin->value());
-    });
-
-    connect(torqueMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this]() {
-        torqueSlider->setRange(torqueMinSpin->value(), torqueMaxSpin->value());
-    });
-
+    layout->setColumnStretch(4, 1);
     return group;
 }
 
-QGroupBox *MainWindow::createVelocityGroup()
+QWidget *MainWindow::createVelocityGroup()
 {
     QGroupBox *group = new QGroupBox("Velocity Control");
-    QVBoxLayout *main = new QVBoxLayout(group);
-
-    main->setContentsMargins(14, 24, 14, 14);
-    main->setSpacing(10);
-
-    QHBoxLayout *top = new QHBoxLayout;
-    top->setSpacing(10);
+    QGridLayout *layout = new QGridLayout(group);
+    layout->setContentsMargins(16, 24, 16, 16);
+    layout->setHorizontalSpacing(12);
+    layout->setVerticalSpacing(12);
 
     velocityMinSpin = new QSpinBox;
+    velocityMinSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
+    velocityMinSpin->setValue(DEFAULT_VELMIN_VALUE);
+    velocityMinSpin->setMinimumWidth(130);
+
     velocityMaxSpin = new QSpinBox;
+    velocityMaxSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
+    velocityMaxSpin->setValue(DEFAULT_VELMAX_VALUE);
+    velocityMaxSpin->setMinimumWidth(130);
+
     velocityDirectSpin = new QSpinBox;
-
-    velocityMinSpin->setRange(-5000000, 5000000);
-    velocityMaxSpin->setRange(-5000000, 5000000);
-    velocityDirectSpin->setRange(-5000000, 5000000);
-
-    velocityMinSpin->setValue(-100000);
-    velocityMaxSpin->setValue(4000000);
+    velocityDirectSpin->setRange(DEFAULT_VELMIN_VALUE, DEFAULT_VELMAX_VALUE);
     velocityDirectSpin->setValue(0);
-
-    velocityMinSpin->setFixedWidth(130);
-    velocityMaxSpin->setFixedWidth(130);
-    velocityDirectSpin->setFixedWidth(160);
-
-    velocityMinSpin->setMinimumHeight(32);
-    velocityMaxSpin->setMinimumHeight(32);
-    velocityDirectSpin->setMinimumHeight(32);
+    velocityDirectSpin->setMinimumWidth(150);
+    velocityDirectSpin->setKeyboardTracking(false); // send only when Enter/focus-out or Apply is clicked
 
     applyVelocityButton = new QPushButton("Apply Velocity");
-    applyVelocityButton->setMinimumHeight(36);
-    applyVelocityButton->setFixedWidth(150);
-
-    top->addWidget(new QLabel("Min:"));
-    top->addWidget(velocityMinSpin);
-    top->addSpacing(8);
-    top->addWidget(new QLabel("Max:"));
-    top->addWidget(velocityMaxSpin);
-    top->addSpacing(8);
-    top->addWidget(new QLabel("Direct Value:"));
-    top->addStretch(1);
-    top->addWidget(velocityDirectSpin);
-    top->addWidget(new QLabel("Internal"));
-    top->addWidget(applyVelocityButton);
-
-    QHBoxLayout *bottom = new QHBoxLayout;
-    bottom->setSpacing(14);
+    applyVelocityButton->setMinimumWidth(140);
 
     velocitySlider = new QSlider(Qt::Horizontal);
-    velocitySlider->setRange(-100000, 4000000);
+    velocitySlider->setRange(DEFAULT_VELMIN_VALUE, DEFAULT_VELMAX_VALUE);
     velocitySlider->setValue(0);
-    velocitySlider->setMinimumHeight(34);
+    velocitySlider->setTracking(true);    // display live value while sliding
+    velocitySlider->setTickPosition(QSlider::TicksBelow);
+    velocitySlider->setTickInterval(500000);
 
-    QLabel *valueText = new QLabel("Value:");
     velocityValueLabel = new QLabel("0");
-    velocityValueLabel->setObjectName("valueNumber");
-    velocityValueLabel->setMinimumWidth(80);
+    velocityValueLabel->setObjectName("blueValueLabel");
+    velocityValueLabel->setMinimumWidth(140);
 
-    bottom->addWidget(velocitySlider, 1);
-    bottom->addWidget(valueText);
-    bottom->addWidget(velocityValueLabel);
+    layout->addWidget(new QLabel("Min:"), 0, 0);
+    layout->addWidget(velocityMinSpin, 0, 1);
+    layout->addWidget(new QLabel("Max:"), 0, 2);
+    layout->addWidget(velocityMaxSpin, 0, 3);
+    layout->addWidget(new QLabel("Direct Value:"), 0, 4);
+    layout->addWidget(velocityDirectSpin, 0, 5);
+    layout->addWidget(new QLabel("Internal"), 0, 6);
+    layout->addWidget(applyVelocityButton, 0, 7);
 
-    main->addLayout(top);
-    main->addLayout(bottom);
+    layout->addWidget(velocitySlider, 1, 0, 1, 6);
+    layout->addWidget(new QLabel("Value:"), 1, 6);
+    layout->addWidget(velocityValueLabel, 1, 7);
 
-    connect(velocitySlider, &QSlider::valueChanged,
-            this, &MainWindow::onVelocitySliderChanged);
-
-    connect(velocityDirectSpin, qOverload<int>(&QSpinBox::valueChanged),
-            velocitySlider, &QSlider::setValue);
-
-    connect(applyVelocityButton, &QPushButton::clicked,
-            this, &MainWindow::applyVelocity);
-
-    connect(velocityMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this]() {
-        velocitySlider->setRange(velocityMinSpin->value(), velocityMaxSpin->value());
-    });
-
-    connect(velocityMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this]() {
-        velocitySlider->setRange(velocityMinSpin->value(), velocityMaxSpin->value());
-    });
-
+    layout->setColumnStretch(4, 1);
     return group;
 }
 
-QGroupBox *MainWindow::createLogGroup()
+QWidget *MainWindow::createLogGroup()
 {
     QGroupBox *group = new QGroupBox("UART / Register Log");
     QVBoxLayout *layout = new QVBoxLayout(group);
-
-    layout->setContentsMargins(14, 24, 14, 14);
+    layout->setContentsMargins(16, 24, 16, 16);
 
     logText = new QTextEdit;
     logText->setReadOnly(true);
-    logText->setMinimumHeight(190);
-    logText->setObjectName("logText");
-
+    logText->setMinimumHeight(170);
     layout->addWidget(logText);
 
     return group;
 }
 
-void MainWindow::applyStyle()
+void MainWindow::applyStyleSheet()
 {
-    qApp->setStyleSheet(
-        "QWidget {"
-        "    font-family: Segoe UI;"
-        "    font-size: 10pt;"
-        "    color: #06142E;"
-        "}"
+    setStyleSheet(
+        "QMainWindow { background-color: #F5F7FA; }"
+        "QWidget { font-family: Segoe UI; font-size: 14px; color: #111827; }"
+        "#titleLabel { font-size: 28px; font-weight: bold; color: #111827; padding: 4px; }"
+        "QGroupBox { background-color: #FFFFFF; border: 1px solid #D1D5DB; border-radius: 10px; margin-top: 12px; font-size: 17px; font-weight: bold; }"
+        "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0px 8px; left: 12px; }"
+        "QLineEdit, QSpinBox { background-color: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; padding: 5px; font-size: 15px; }"
+        "QPushButton { background-color: #2563EB; color: white; border-radius: 7px; padding: 8px 16px; font-weight: bold; }"
+        "QPushButton:hover { background-color: #1D4ED8; }"
+        "QPushButton:pressed { background-color: #1E40AF; }"
+        "#estopButton { background-color: #EF233C; color: white; font-size: 30px; font-weight: bold; border-radius: 34px; border: 2px solid #B91C1C; }"
+        "#estopButton:hover { background-color: #DC2626; }"
+        "#estopButton:pressed { background-color: #991B1B; }"
+        "QSlider::groove:horizontal { height: 8px; background: #D1D5DB; border-radius: 4px; }"
+        "QSlider::handle:horizontal { background: #2563EB; border: 2px solid #1D4ED8; width: 22px; height: 22px; margin: -8px 0; border-radius: 11px; }"
+        "QSlider::sub-page:horizontal { background: #2563EB; border-radius: 4px; }"
+        "#blueValueLabel { color: #1D4ED8; font-size: 20px; font-weight: bold; }"
+        "#statusGood { background-color: #ECFDF5; color: #16A34A; border: 1px solid #BBF7D0; border-radius: 8px; padding: 8px 20px; font-size: 17px; font-weight: bold; }"
+        "#statusBad { background-color: #FEF2F2; color: #DC2626; border: 1px solid #FCA5A5; border-radius: 8px; padding: 8px 20px; font-size: 17px; font-weight: bold; }"
+        "#dotGreen { color: #16A34A; font-size: 26px; }"
+        "#dotRed { color: #DC2626; font-size: 26px; }"
+        "QTextEdit { background-color: #0F172A; color: #E5E7EB; border-radius: 8px; font-family: Consolas; font-size: 12px; }"
+    );
+}
 
-        "QMainWindow {"
-        "    background-color: #F4F7FB;"
-        "}"
+void MainWindow::setupConnections()
+{
+    connect(connectButton, &QPushButton::clicked, this, &MainWindow::connectAndInitialize);
 
-        "QGroupBox {"
-        "    background-color: #FFFFFF;"
-        "    border: 1px solid #CBD3DF;"
-        "    border-radius: 8px;"
-        "    margin-top: 12px;"
-        "    font-weight: 700;"
-        "}"
+    connect(&tmc, &Tmc6460QtInterface::logMessage, this, &MainWindow::appendLog);
+    connect(&tmc, &Tmc6460QtInterface::errorChanged, this, &MainWindow::showError);
 
-        "QGroupBox::title {"
-        "    subcontrol-origin: margin;"
-        "    subcontrol-position: top left;"
-        "    left: 18px;"
-        "    padding: 0px 6px;"
-        "    background-color: #F4F7FB;"
-        "    color: #000000;"
-        "}"
+    connect(torqueSlider, &QSlider::valueChanged, this, &MainWindow::onTorqueSliderValueChanged);
+    connect(torqueSlider, &QSlider::sliderReleased, this, &MainWindow::onTorqueSliderReleased);
+    connect(torqueDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueDirectValueChanged);
+    connect(torqueDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onTorqueDirectEditingFinished);
+    connect(applyTorqueButton, &QPushButton::clicked, this, &MainWindow::onApplyTorqueClicked);
+    connect(torqueMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
+    connect(torqueMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
 
-        "QLineEdit, QSpinBox {"
-        "    background-color: #FFFFFF;"
-        "    border: 1px solid #C5D0DF;"
-        "    border-radius: 5px;"
-        "    padding: 4px 8px;"
-        "    min-height: 24px;"
-        "}"
+    connect(velocitySlider, &QSlider::valueChanged, this, &MainWindow::onVelocitySliderValueChanged);
+    connect(velocitySlider, &QSlider::sliderReleased, this, &MainWindow::onVelocitySliderReleased);
+    connect(velocityDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityDirectValueChanged);
+    connect(velocityDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onVelocityDirectEditingFinished);
+    connect(applyVelocityButton, &QPushButton::clicked, this, &MainWindow::onApplyVelocityClicked);
+    connect(velocityMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
+    connect(velocityMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
 
-        "QLineEdit:focus, QSpinBox:focus {"
-        "    border: 1px solid #2F66E8;"
-        "}"
+    connect(estopButton, &QPushButton::clicked, this, &MainWindow::onEstopClicked);
 
-        "QPushButton {"
-        "    background-color: #2F66E8;"
-        "    color: white;"
-        "    border: none;"
-        "    border-radius: 6px;"
-        "    font-weight: 700;"
-        "    padding: 8px 16px;"
-        "}"
+    torqueCommandTimer.setSingleShot(true);
+    velocityCommandTimer.setSingleShot(true);
+    connect(&torqueCommandTimer, &QTimer::timeout, this, &MainWindow::sendPendingTorqueCommand);
+    connect(&velocityCommandTimer, &QTimer::timeout, this, &MainWindow::sendPendingVelocityCommand);
 
-        "QPushButton:hover {"
-        "    background-color: #2554C7;"
-        "}"
-
-        "QPushButton:pressed {"
-        "    background-color: #1F45A5;"
-        "}"
-
-        "QPushButton:disabled {"
-        "    background-color: #AAB3C2;"
-        "    color: #EEF1F5;"
-        "}"
-
-        "QPushButton#estopButton {"
-        "    background-color: #EF233C;"
-        "    border: 3px solid #B5152A;"
-        "    border-radius: 34px;"
-        "    font-size: 24pt;"
-        "    font-weight: 900;"
-        "    color: white;"
-        "}"
-
-        "QPushButton#estopButton:hover {"
-        "    background-color: #D91E36;"
-        "}"
-
-        "QLabel#chipValue {"
-        "    color: #174CFF;"
-        "    font-weight: 800;"
-        "    font-size: 11pt;"
-        "}"
-
-        "QLabel#statusText {"
-        "    background-color: #FFF4F4;"
-        "    border: 1px solid #FFA8A8;"
-        "    border-radius: 6px;"
-        "    color: #D7263D;"
-        "    font-weight: 800;"
-        "    padding: 8px 14px;"
-        "}"
-
-        "QLabel#valueNumber {"
-        "    color: #174CFF;"
-        "    font-size: 14pt;"
-        "    font-weight: 900;"
-        "}"
-
-        "QTextEdit#logText {"
-        "    background-color: #0B1325;"
-        "    color: #D9F99D;"
-        "    border-radius: 6px;"
-        "    border: 1px solid #0B1325;"
-        "    font-family: Consolas;"
-        "    font-size: 10pt;"
-        "}"
-
-        "QSlider::groove:horizontal {"
-        "    height: 7px;"
-        "    background: #D4DAE3;"
-        "    border-radius: 3px;"
-        "}"
-
-        "QSlider::sub-page:horizontal {"
-        "    background: #2F66E8;"
-        "    border-radius: 3px;"
-        "}"
-
-        "QSlider::handle:horizontal {"
-        "    background: #2F66E8;"
-        "    border: 1px solid #1743AA;"
-        "    width: 20px;"
-        "    height: 20px;"
-        "    margin: -8px 0px;"
-        "    border-radius: 10px;"
-        "}"
-        );
+    connect(&statusTimer, &QTimer::timeout, this, &MainWindow::updateChipStatus);
 }
 
 void MainWindow::connectAndInitialize()
 {
-    if (serial->isOpen()) {
-        sendCommand("VEL 0");
-        serial->close();
-        statusTimer->stop();
-        initialized = false;
-        currentVelocity = 0;
+    clearError();
+    connectButton->setEnabled(false);
 
-        setStatusDisconnected();
-        logMessage("Disconnected.");
-        connectInitButton->setText("Connect + Initialize");
+    if (!tmc.openPort(portEdit->text().trimmed(), DEFAULT_BAUD_RATE))
+    {
+        setConnectedUi(false);
+        connectButton->setEnabled(true);
         return;
     }
 
-    const QString portName = portEdit->text().trimmed();
-
-    if (portName.isEmpty()) {
-        setStatusError("COM port empty");
-        logMessage("ERROR: COM port is empty.");
+    if (!tmc.initializeMotor())
+    {
+        setStatusText("Initialization failed", false);
+        connectButton->setEnabled(true);
         return;
     }
 
-    serial->setPortName(portName);
-    serial->setBaudRate(115200);
-    serial->setDataBits(QSerialPort::Data8);
-    serial->setParity(QSerialPort::NoParity);
-    serial->setStopBits(QSerialPort::OneStop);
-    serial->setFlowControl(QSerialPort::NoFlowControl);
-
-    if (!serial->open(QIODevice::ReadWrite)) {
-        setStatusError("Open failed");
-        logMessage("ERROR: Could not open " + portName + ": " + serial->errorString());
-        return;
+    quint32 chipId = 0;
+    if (tmc.readChipId(&chipId))
+    {
+        chipIdValueLabel->setText(QString("0x%1").arg(chipId, 8, 16, QLatin1Char('0')).toUpper());
     }
 
-    serial->clear();
-
-    setStatusConnected();
-    setErrorState(false, "No error");
-    logMessage("Connected to " + portName + " at 115200 baud.");
-
-    sendCommand("VEL 0");
-    sendCommand("INIT");
-
-    initialized = true;
-    currentVelocity = 0;
-    pendingVelocity = 0;
-
-    setStatusInitialized();
-    connectInitButton->setText("Disconnect");
-
-    statusTimer->start(1000);
+    setConnectedUi(true);
+    statusTimer.start(STATUS_TIMER_MS);
+    connectButton->setEnabled(true);
 }
 
-void MainWindow::emergencyStop()
+void MainWindow::onTorqueSliderValueChanged(int value)
 {
-    reverseDelayTimer->stop();
+    torqueValueLabel->setText(QString::number(value));
 
-    if (serial->isOpen()) {
-        sendCommand("VEL 0");
-        sendCommand("ESTOP");
-    }
-
-    initialized = false;
-    currentVelocity = 0;
-    pendingVelocity = 0;
-
-    velocitySlider->setValue(0);
-    velocityDirectSpin->setValue(0);
-
-    setStatusError("E-STOP active");
-    logMessage("E-STOP activated. Click Connect + Initialize again before running.");
-}
-
-void MainWindow::applyTorque()
-{
-    if (!serial->isOpen() || !initialized) {
-        logMessage("ERROR: Not connected / not initialized.");
-        return;
-    }
-
-    const int torque = torqueDirectSpin->value();
-
-    sendCommand("TORQUE " + QString::number(torque));
-    logMessage("Torque applied: " + QString::number(torque));
-}
-
-void MainWindow::applyVelocity()
-{
-    if (!serial->isOpen() || !initialized) {
-        logMessage("ERROR: Not connected / not initialized.");
-        return;
-    }
-
-    const int newVelocity = velocityDirectSpin->value();
-    pendingVelocity = newVelocity;
-
-    if (isDirectionReversal(newVelocity)) {
-        logMessage("Direction reversal detected. Sending VEL 0 first to avoid jerk.");
-
-        sendCommand("VEL 0");
-        currentVelocity = 0;
-
-        reverseDelayTimer->start(700);
-        return;
-    }
-
-    sendCommand("VEL " + QString::number(newVelocity));
-    currentVelocity = newVelocity;
-
-    logMessage("Velocity applied: " + QString::number(newVelocity));
-}
-
-void MainWindow::sendPendingVelocityAfterDelay()
-{
-    if (!serial->isOpen() || !initialized) {
-        return;
-    }
-
-    sendCommand("VEL " + QString::number(pendingVelocity));
-    currentVelocity = pendingVelocity;
-
-    logMessage("Velocity applied after reversal delay: " + QString::number(currentVelocity));
-}
-
-void MainWindow::onTorqueSliderChanged(int value)
-{
-    torqueDirectSpin->blockSignals(true);
+    QSignalBlocker blocker(torqueDirectSpin);
     torqueDirectSpin->setValue(value);
-    torqueDirectSpin->blockSignals(false);
+}
+
+void MainWindow::onTorqueSliderReleased()
+{
+    scheduleTorqueCommand(torqueSlider->value());
+}
+
+void MainWindow::onTorqueDirectValueChanged(int value)
+{
+    if (syncingUi)
+    {
+        return;
+    }
+
+    {
+        QSignalBlocker blocker(torqueSlider);
+        torqueSlider->setValue(value);
+    }
 
     torqueValueLabel->setText(QString::number(value));
 }
 
-void MainWindow::onVelocitySliderChanged(int value)
+void MainWindow::onTorqueDirectEditingFinished()
 {
-    velocityDirectSpin->blockSignals(true);
+    scheduleTorqueCommand(torqueDirectSpin->value());
+}
+
+void MainWindow::onApplyTorqueClicked()
+{
+    scheduleTorqueCommand(torqueDirectSpin->value());
+}
+
+void MainWindow::onTorqueRangeChanged()
+{
+    updateRange(torqueMinSpin, torqueMaxSpin, torqueSlider, torqueDirectSpin, torqueValueLabel);
+}
+
+void MainWindow::onVelocitySliderValueChanged(int value)
+{
+    velocityValueLabel->setText(QString::number(value));
+
+    QSignalBlocker blocker(velocityDirectSpin);
     velocityDirectSpin->setValue(value);
-    velocityDirectSpin->blockSignals(false);
+}
+
+void MainWindow::onVelocitySliderReleased()
+{
+    scheduleVelocityCommand(velocitySlider->value());
+}
+
+void MainWindow::onVelocityDirectValueChanged(int value)
+{
+    if (syncingUi)
+    {
+        return;
+    }
+
+    {
+        QSignalBlocker blocker(velocitySlider);
+        velocitySlider->setValue(value);
+    }
 
     velocityValueLabel->setText(QString::number(value));
 }
 
-void MainWindow::readSerialData()
+void MainWindow::onVelocityDirectEditingFinished()
 {
-    const QByteArray data = serial->readAll();
+    scheduleVelocityCommand(velocityDirectSpin->value());
+}
 
-    if (data.isEmpty()) {
+void MainWindow::onApplyVelocityClicked()
+{
+    scheduleVelocityCommand(velocityDirectSpin->value());
+}
+
+void MainWindow::onVelocityRangeChanged()
+{
+    updateRange(velocityMinSpin, velocityMaxSpin, velocitySlider, velocityDirectSpin, velocityValueLabel);
+}
+
+void MainWindow::onEstopClicked()
+{
+    clearError();
+    torqueCommandTimer.stop();
+    velocityCommandTimer.stop();
+
+    syncingUi = true;
+    {
+        QSignalBlocker b1(torqueSlider);
+        QSignalBlocker b2(torqueDirectSpin);
+        QSignalBlocker b3(velocitySlider);
+        QSignalBlocker b4(velocityDirectSpin);
+
+        torqueSlider->setValue(0);
+        torqueDirectSpin->setValue(0);
+        velocitySlider->setValue(0);
+        velocityDirectSpin->setValue(0);
+    }
+    syncingUi = false;
+
+    torqueValueLabel->setText("0");
+    velocityValueLabel->setText("0");
+
+    if (tmc.emergencyStop())
+    {
+        setStatusText("E-STOP", false);
+        showError("Emergency stop active. Driver disabled.");
+    }
+}
+
+void MainWindow::scheduleTorqueCommand(int value)
+{
+    if (!tmc.isOpen())
+    {
         return;
     }
 
-    const QString text = QString::fromLocal8Bit(data);
-
-    logText->moveCursor(QTextCursor::End);
-    logText->insertPlainText(text);
-    logText->moveCursor(QTextCursor::End);
-
-    if (text.contains("CHIP.ID", Qt::CaseInsensitive) ||
-        text.contains("CHIP ID", Qt::CaseInsensitive)) {
-
-        int index = text.indexOf("0x", 0, Qt::CaseInsensitive);
-        if (index >= 0 && text.length() >= index + 10) {
-            chipIdValueLabel->setText(text.mid(index, 10));
-        } else {
-            chipIdValueLabel->setText("Detected");
-        }
-    }
-
-    if (text.contains("ERROR", Qt::CaseInsensitive) ||
-        text.contains("FAULT", Qt::CaseInsensitive) ||
-        text.contains("FAIL", Qt::CaseInsensitive)) {
-        setErrorState(true, "Check log");
-    }
-
-    if (text.contains("GDRV_ON", Qt::CaseInsensitive) ||
-        text.contains("READY", Qt::CaseInsensitive) ||
-        text.contains("Initialized", Qt::CaseInsensitive)) {
-        setStatusInitialized();
-    }
+    pendingTorque = value;
+    torqueCommandTimer.start(COMMAND_DEBOUNCE_MS);
 }
 
-void MainWindow::handleSerialError(QSerialPort::SerialPortError error)
+void MainWindow::scheduleVelocityCommand(int value)
 {
-    if (error == QSerialPort::NoError) {
+    if (!tmc.isOpen())
+    {
         return;
     }
 
-    if (error == QSerialPort::ResourceError) {
-        setStatusError("Serial disconnected");
-        logMessage("ERROR: Serial disconnected unexpectedly.");
+    pendingVelocity = value;
+    velocityCommandTimer.start(COMMAND_DEBOUNCE_MS);
+}
 
-        statusTimer->stop();
-        serial->close();
-        initialized = false;
-        connectInitButton->setText("Connect + Initialize");
+void MainWindow::sendPendingTorqueCommand()
+{
+    if (tmc.isBusy())
+    {
+        torqueCommandTimer.start(COMMAND_DEBOUNCE_MS);
         return;
     }
 
-    logMessage("Serial error: " + serial->errorString());
+    clearError();
+    tmc.setTorqueTarget(pendingTorque);
 }
 
-void MainWindow::pollStatus()
+void MainWindow::sendPendingVelocityCommand()
 {
-    if (serial->isOpen()) {
-        sendCommand("STATUS");
-    }
-}
-
-void MainWindow::sendCommand(const QString &command)
-{
-    if (!serial->isOpen()) {
-        logMessage("ERROR: Serial port not open.");
+    if (tmc.isBusy())
+    {
+        velocityCommandTimer.start(COMMAND_DEBOUNCE_MS);
         return;
     }
 
-    const QString tx = command.trimmed() + "\n";
-
-    serial->write(tx.toUtf8());
-    serial->flush();
-
-    logMessage("TX: " + command.trimmed());
+    clearError();
+    tmc.setVelocityTarget(pendingVelocity);
 }
 
-void MainWindow::logMessage(const QString &message)
+void MainWindow::updateChipStatus()
 {
-    const QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
-
-    logText->append("[" + timestamp + "] " + message);
-    logText->verticalScrollBar()->setValue(logText->verticalScrollBar()->maximum());
-}
-
-void MainWindow::setStatusDisconnected()
-{
-    statusLampLabel->setStyleSheet(
-        "background-color: #D7263D;"
-        "border-radius: 6px;"
-        );
-
-    statusTextLabel->setText("Disconnected");
-    statusTextLabel->setStyleSheet(
-        "background-color: #FFF4F4;"
-        "border: 1px solid #FFA8A8;"
-        "border-radius: 6px;"
-        "color: #D7263D;"
-        "font-weight: 800;"
-        "padding: 8px 14px;"
-        );
-}
-
-void MainWindow::setStatusConnected()
-{
-    statusLampLabel->setStyleSheet(
-        "background-color: #F59E0B;"
-        "border-radius: 6px;"
-        );
-
-    statusTextLabel->setText("Connected");
-    statusTextLabel->setStyleSheet(
-        "background-color: #FFF7E6;"
-        "border: 1px solid #FBCB7A;"
-        "border-radius: 6px;"
-        "color: #B45309;"
-        "font-weight: 800;"
-        "padding: 8px 14px;"
-        );
-}
-
-void MainWindow::setStatusInitialized()
-{
-    statusLampLabel->setStyleSheet(
-        "background-color: #16A34A;"
-        "border-radius: 6px;"
-        );
-
-    statusTextLabel->setText("Initialized");
-    statusTextLabel->setStyleSheet(
-        "background-color: #ECFDF3;"
-        "border: 1px solid #86EFAC;"
-        "border-radius: 6px;"
-        "color: #15803D;"
-        "font-weight: 800;"
-        "padding: 8px 14px;"
-        );
-}
-
-void MainWindow::setStatusError(const QString &errorText)
-{
-    statusLampLabel->setStyleSheet(
-        "background-color: #D7263D;"
-        "border-radius: 6px;"
-        );
-
-    statusTextLabel->setText(errorText);
-    statusTextLabel->setStyleSheet(
-        "background-color: #FFF4F4;"
-        "border: 1px solid #FFA8A8;"
-        "border-radius: 6px;"
-        "color: #D7263D;"
-        "font-weight: 800;"
-        "padding: 8px 14px;"
-        );
-
-    setErrorState(true, errorText);
-}
-
-void MainWindow::setErrorState(bool error, const QString &text)
-{
-    if (error) {
-        errorLampLabel->setStyleSheet(
-            "background-color: #D7263D;"
-            "border-radius: 6px;"
-            );
-    } else {
-        errorLampLabel->setStyleSheet(
-            "background-color: #16A34A;"
-            "border-radius: 6px;"
-            );
+    if (!tmc.isOpen() || tmc.isBusy())
+    {
+        return;
     }
 
-    errorTextLabel->setText(text);
-}
+    quint32 chipId = 0;
+    quint32 statusFlags = 0;
 
-bool MainWindow::isDirectionReversal(int newVelocity) const
-{
-    if (currentVelocity == 0 || newVelocity == 0) {
-        return false;
+    if (tmc.readChipId(&chipId))
+    {
+        chipIdValueLabel->setText(QString("0x%1").arg(chipId, 8, 16, QLatin1Char('0')).toUpper());
     }
 
-    return ((currentVelocity > 0) != (newVelocity > 0));
+    if (tmc.readChipStatusFlags(&statusFlags))
+    {
+        setStatusText(QString("Connected  STATUS=0x%1").arg(statusFlags, 8, 16, QLatin1Char('0')).toUpper(), true);
+    }
+}
+
+void MainWindow::appendLog(const QString &message)
+{
+    const QString line = QString("[%1] %2")
+                             .arg(QDateTime::currentDateTime().toString("HH:mm:ss.zzz"))
+                             .arg(message);
+    logText->append(line);
+}
+
+void MainWindow::showError(const QString &message)
+{
+    errorDotLabel->setObjectName("dotRed");
+    errorDotLabel->style()->unpolish(errorDotLabel);
+    errorDotLabel->style()->polish(errorDotLabel);
+    errorTextLabel->setText(message);
+}
+
+void MainWindow::clearError()
+{
+    errorDotLabel->setObjectName("dotGreen");
+    errorDotLabel->style()->unpolish(errorDotLabel);
+    errorDotLabel->style()->polish(errorDotLabel);
+    errorTextLabel->setText("No error");
+}
+
+void MainWindow::updateRange(QSpinBox *minSpin, QSpinBox *maxSpin, QSlider *slider, QSpinBox *directSpin, QLabel *valueLabel)
+{
+    int minValue = minSpin->value();
+    int maxValue = maxSpin->value();
+
+    if (minValue >= maxValue)
+    {
+        maxValue = minValue + 1;
+        QSignalBlocker blocker(maxSpin);
+        maxSpin->setValue(maxValue);
+    }
+
+    const int oldValue = directSpin->value();
+    const int clippedValue = qBound(minValue, oldValue, maxValue);
+
+    syncingUi = true;
+    {
+        QSignalBlocker b1(slider);
+        QSignalBlocker b2(directSpin);
+        slider->setRange(minValue, maxValue);
+        directSpin->setRange(minValue, maxValue);
+        slider->setValue(clippedValue);
+        directSpin->setValue(clippedValue);
+    }
+    syncingUi = false;
+
+    valueLabel->setText(QString::number(clippedValue));
+}
+
+void MainWindow::setConnectedUi(bool connected)
+{
+    if (connected)
+    {
+        setStatusText("Connected", true);
+    }
+    else
+    {
+        setStatusText("Disconnected", false);
+        chipIdValueLabel->setText("----");
+    }
+}
+
+void MainWindow::setStatusText(const QString &text, bool ok)
+{
+    statusValueLabel->setText(QString("●  %1").arg(text));
+    statusValueLabel->setObjectName(ok ? "statusGood" : "statusBad");
+    statusValueLabel->style()->unpolish(statusValueLabel);
+    statusValueLabel->style()->polish(statusValueLabel);
 }
