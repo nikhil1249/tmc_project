@@ -192,7 +192,17 @@ bool Tmc6460QtInterface::readRunStatus(RunStatus *status)
     ok &= readRegister(REG_MCC_CONFIG_GDRV, &result.gdrv);
     ok &= readRegister(REG_FOC_PID_VELOCITY_TARGET, &result.velocityTarget);
     ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_TARGET, &result.torqueFluxTarget);
-    ok &= readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &result.velocityActual);
+
+    quint32 velocityActualReg = 0;
+    if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &velocityActualReg))
+    {
+        result.velocityActualraw = static_cast<qint32>(velocityActualReg);
+    }
+    else
+    {
+        ok = false;
+    }
+
     ok &= readRegister(REG_FOC_PID_POSITION_ACTUAL, &result.positionActual);
     ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &result.torqueFluxActual);
 

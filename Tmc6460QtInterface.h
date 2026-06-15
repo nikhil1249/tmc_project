@@ -27,7 +27,7 @@ public:
         quint32 gdrv = 0;
         quint32 velocityTarget = 0;
         quint32 torqueFluxTarget = 0;
-        quint32 velocityActual = 0;
+        quint32 velocityActualraw = 0;
         quint32 positionActual = 0;
         quint32 torqueFluxActual = 0;
         quint32 phaseCurrentUraw = 0;

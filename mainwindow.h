@@ -5,6 +5,7 @@
 
 #include <QMainWindow>
 #include <QTimer>
+#include <QString>
 
 class QLabel;
 class QPushButton;
@@ -83,6 +84,7 @@ private:
     QLabel *velocityValueLabel = nullptr;
 
     QLabel *currentMilliAmpLabel = nullptr;
+    QLabel *velocityActualRawLabel = nullptr;
     QLabel *torqueActualRawLabel = nullptr;
     QLabel *fluxActualRawLabel = nullptr;
     QLabel *phaseUrawLabel = nullptr;

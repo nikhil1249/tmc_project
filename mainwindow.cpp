@@ -257,6 +257,9 @@ QWidget *MainWindow::createFeedbackGroup()
     currentMilliAmpLabel = new QLabel("-- mA");
     currentMilliAmpLabel->setObjectName("feedbackValueLabel");
 
+    velocityActualRawLabel = new QLabel("--");
+    velocityActualRawLabel->setObjectName("feedbackValueLabel");
+
     torqueActualRawLabel = new QLabel("--");
     torqueActualRawLabel->setObjectName("feedbackValueLabel");
 
@@ -274,17 +277,24 @@ QWidget *MainWindow::createFeedbackGroup()
 
     layout->addWidget(new QLabel("Current Iq estimate:"), 0, 0);
     layout->addWidget(currentMilliAmpLabel, 0, 1);
-    layout->addWidget(new QLabel("Torque actual raw:"), 0, 2);
-    layout->addWidget(torqueActualRawLabel, 0, 3);
-    layout->addWidget(new QLabel("Flux actual raw:"), 0, 4);
-    layout->addWidget(fluxActualRawLabel, 0, 5);
 
-    layout->addWidget(new QLabel("Phase U raw:"), 1, 0);
-    layout->addWidget(phaseUrawLabel, 1, 1);
-    layout->addWidget(new QLabel("Phase V raw:"), 1, 2);
-    layout->addWidget(phaseVrawLabel, 1, 3);
-    layout->addWidget(new QLabel("Phase W raw:"), 1, 4);
-    layout->addWidget(phaseWrawLabel, 1, 5);
+    layout->addWidget(new QLabel("Velocity actual raw:"), 0, 2);
+    layout->addWidget(velocityActualRawLabel, 0, 3);
+
+    layout->addWidget(new QLabel("Torque actual raw:"), 0, 4);
+    layout->addWidget(torqueActualRawLabel, 0, 5);
+
+    layout->addWidget(new QLabel("Flux actual raw:"), 1, 0);
+    layout->addWidget(fluxActualRawLabel, 1, 1);
+
+    layout->addWidget(new QLabel("Phase U raw:"), 1, 2);
+    layout->addWidget(phaseUrawLabel, 1, 3);
+
+    layout->addWidget(new QLabel("Phase V raw:"), 1, 4);
+    layout->addWidget(phaseVrawLabel, 1, 5);
+
+    layout->addWidget(new QLabel("Phase W raw:"), 2, 0);
+    layout->addWidget(phaseWrawLabel, 2, 1);
 
     layout->setColumnStretch(6, 1);
     return group;
@@ -580,6 +590,7 @@ void MainWindow::updateChipStatus()
         setStatusText(QString("Connected  STATUS=0x%1").arg(statusFlags, 8, 16, QLatin1Char('0')).toUpper(), true);
 
         currentMilliAmpLabel->setText(QString("%1 mA").arg(runStatus.torqueCurrentMilliAmp));
+        velocityActualRawLabel->setText(QString::number(static_cast<qint32>(runStatus.velocityActualraw)));
         torqueActualRawLabel->setText(QString::number(runStatus.torqueActualRaw));
         fluxActualRawLabel->setText(QString::number(runStatus.fluxActualRaw));
         phaseUrawLabel->setText(QString::number(Tmc6460QtInterface::lowSigned16(runStatus.phaseCurrentUraw)));
@@ -656,6 +667,7 @@ void MainWindow::setConnectedUi(bool connected)
         setStatusText("Disconnected", false);
         chipIdValueLabel->setText("----");
         if (currentMilliAmpLabel != nullptr) currentMilliAmpLabel->setText("-- mA");
+        if (velocityActualRawLabel != nullptr) velocityActualRawLabel->setText("--");
         if (torqueActualRawLabel != nullptr) torqueActualRawLabel->setText("--");
         if (fluxActualRawLabel != nullptr) fluxActualRawLabel->setText("--");
         if (phaseUrawLabel != nullptr) phaseUrawLabel->setText("--");
