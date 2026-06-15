@@ -42,6 +42,7 @@ void MainWindow::buildUi()
     mainLayout->addWidget(createStatusAndEstopRow());
     mainLayout->addWidget(createTorqueGroup());
     mainLayout->addWidget(createVelocityGroup());
+    mainLayout->addWidget(createFeedbackGroup());
     mainLayout->addWidget(createLogGroup(), 1);
 
     setCentralWidget(central);
@@ -245,6 +246,50 @@ QWidget *MainWindow::createVelocityGroup()
     return group;
 }
 
+QWidget *MainWindow::createFeedbackGroup()
+{
+    QGroupBox *group = new QGroupBox("Live Feedback");
+    QGridLayout *layout = new QGridLayout(group);
+    layout->setContentsMargins(16, 24, 16, 16);
+    layout->setHorizontalSpacing(18);
+    layout->setVerticalSpacing(10);
+
+    currentMilliAmpLabel = new QLabel("-- mA");
+    currentMilliAmpLabel->setObjectName("feedbackValueLabel");
+
+    torqueActualRawLabel = new QLabel("--");
+    torqueActualRawLabel->setObjectName("feedbackValueLabel");
+
+    fluxActualRawLabel = new QLabel("--");
+    fluxActualRawLabel->setObjectName("feedbackValueLabel");
+
+    phaseUrawLabel = new QLabel("--");
+    phaseUrawLabel->setObjectName("feedbackSmallValueLabel");
+
+    phaseVrawLabel = new QLabel("--");
+    phaseVrawLabel->setObjectName("feedbackSmallValueLabel");
+
+    phaseWrawLabel = new QLabel("--");
+    phaseWrawLabel->setObjectName("feedbackSmallValueLabel");
+
+    layout->addWidget(new QLabel("Current Iq estimate:"), 0, 0);
+    layout->addWidget(currentMilliAmpLabel, 0, 1);
+    layout->addWidget(new QLabel("Torque actual raw:"), 0, 2);
+    layout->addWidget(torqueActualRawLabel, 0, 3);
+    layout->addWidget(new QLabel("Flux actual raw:"), 0, 4);
+    layout->addWidget(fluxActualRawLabel, 0, 5);
+
+    layout->addWidget(new QLabel("Phase U raw:"), 1, 0);
+    layout->addWidget(phaseUrawLabel, 1, 1);
+    layout->addWidget(new QLabel("Phase V raw:"), 1, 2);
+    layout->addWidget(phaseVrawLabel, 1, 3);
+    layout->addWidget(new QLabel("Phase W raw:"), 1, 4);
+    layout->addWidget(phaseWrawLabel, 1, 5);
+
+    layout->setColumnStretch(6, 1);
+    return group;
+}
+
 QWidget *MainWindow::createLogGroup()
 {
     QGroupBox *group = new QGroupBox("UART / Register Log");
@@ -278,12 +323,14 @@ void MainWindow::applyStyleSheet()
         "QSlider::handle:horizontal { background: #2563EB; border: 2px solid #1D4ED8; width: 22px; height: 22px; margin: -8px 0; border-radius: 11px; }"
         "QSlider::sub-page:horizontal { background: #2563EB; border-radius: 4px; }"
         "#blueValueLabel { color: #1D4ED8; font-size: 20px; font-weight: bold; }"
+        "#feedbackValueLabel { color: #0F766E; font-size: 20px; font-weight: bold; }"
+        "#feedbackSmallValueLabel { color: #334155; font-size: 17px; font-weight: bold; }"
         "#statusGood { background-color: #ECFDF5; color: #16A34A; border: 1px solid #BBF7D0; border-radius: 8px; padding: 8px 20px; font-size: 17px; font-weight: bold; }"
         "#statusBad { background-color: #FEF2F2; color: #DC2626; border: 1px solid #FCA5A5; border-radius: 8px; padding: 8px 20px; font-size: 17px; font-weight: bold; }"
         "#dotGreen { color: #16A34A; font-size: 26px; }"
         "#dotRed { color: #DC2626; font-size: 26px; }"
         "QTextEdit { background-color: #0F172A; color: #E5E7EB; border-radius: 8px; font-family: Consolas; font-size: 12px; }"
-    );
+        );
 }
 
 void MainWindow::setupConnections()
@@ -526,7 +573,20 @@ void MainWindow::updateChipStatus()
         chipIdValueLabel->setText(QString("0x%1").arg(chipId, 8, 16, QLatin1Char('0')).toUpper());
     }
 
-    if (tmc.readChipStatusFlags(&statusFlags))
+    Tmc6460QtInterface::RunStatus runStatus;
+    if (tmc.readRunStatus(&runStatus))
+    {
+        statusFlags = runStatus.chipStatusFlags;
+        setStatusText(QString("Connected  STATUS=0x%1").arg(statusFlags, 8, 16, QLatin1Char('0')).toUpper(), true);
+
+        currentMilliAmpLabel->setText(QString("%1 mA").arg(runStatus.torqueCurrentMilliAmp));
+        torqueActualRawLabel->setText(QString::number(runStatus.torqueActualRaw));
+        fluxActualRawLabel->setText(QString::number(runStatus.fluxActualRaw));
+        phaseUrawLabel->setText(QString::number(Tmc6460QtInterface::lowSigned16(runStatus.phaseCurrentUraw)));
+        phaseVrawLabel->setText(QString::number(Tmc6460QtInterface::lowSigned16(runStatus.phaseCurrentVraw)));
+        phaseWrawLabel->setText(QString::number(Tmc6460QtInterface::lowSigned16(runStatus.phaseCurrentWraw)));
+    }
+    else if (tmc.readChipStatusFlags(&statusFlags))
     {
         setStatusText(QString("Connected  STATUS=0x%1").arg(statusFlags, 8, 16, QLatin1Char('0')).toUpper(), true);
     }
@@ -535,8 +595,8 @@ void MainWindow::updateChipStatus()
 void MainWindow::appendLog(const QString &message)
 {
     const QString line = QString("[%1] %2")
-                             .arg(QDateTime::currentDateTime().toString("HH:mm:ss.zzz"))
-                             .arg(message);
+    .arg(QDateTime::currentDateTime().toString("HH:mm:ss.zzz"))
+        .arg(message);
     logText->append(line);
 }
 
@@ -595,6 +655,12 @@ void MainWindow::setConnectedUi(bool connected)
     {
         setStatusText("Disconnected", false);
         chipIdValueLabel->setText("----");
+        if (currentMilliAmpLabel != nullptr) currentMilliAmpLabel->setText("-- mA");
+        if (torqueActualRawLabel != nullptr) torqueActualRawLabel->setText("--");
+        if (fluxActualRawLabel != nullptr) fluxActualRawLabel->setText("--");
+        if (phaseUrawLabel != nullptr) phaseUrawLabel->setText("--");
+        if (phaseVrawLabel != nullptr) phaseVrawLabel->setText("--");
+        if (phaseWrawLabel != nullptr) phaseWrawLabel->setText("--");
     }
 }
 

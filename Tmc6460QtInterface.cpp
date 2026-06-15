@@ -196,6 +196,23 @@ bool Tmc6460QtInterface::readRunStatus(RunStatus *status)
     ok &= readRegister(REG_FOC_PID_POSITION_ACTUAL, &result.positionActual);
     ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &result.torqueFluxActual);
 
+    quint32 iwIu = 0;
+    quint32 iv = 0;
+    if (readRegister(REG_MCC_ADC_IW_IU, &iwIu))
+    {
+        result.phaseCurrentUraw = static_cast<quint32>(static_cast<quint16>(iwIu & 0xFFFFU));
+        result.phaseCurrentWraw = static_cast<quint32>(static_cast<quint16>((iwIu >> 16) & 0xFFFFU));
+    }
+
+    if (readRegister(REG_MCC_ADC_IV, &iv))
+    {
+        result.phaseCurrentVraw = static_cast<quint32>(static_cast<quint16>(iv & 0xFFFFU));
+    }
+
+    result.fluxActualRaw = lowSigned16(result.torqueFluxActual);
+    result.torqueActualRaw = highSigned16(result.torqueFluxActual);
+    result.torqueCurrentMilliAmp = torqueRawToMilliAmp(result.torqueActualRaw);
+
     result.valid = ok;
     *status = result;
     return ok;
@@ -297,8 +314,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
             while (value != 0)
             {
                 value = (value > 0)
-                    ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
-                    : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
+                ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
+                : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
 
                 if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET SOFT_STOP"))
                 {
@@ -321,8 +338,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
     while (value != 0)
     {
         value = (value > 0)
-            ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
-            : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
+        ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
+        : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
 
         if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET RAMP_TO_ZERO"))
         {
@@ -341,8 +358,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
     while (value != targetVelocity)
     {
         value = (targetVelocity > 0)
-            ? qMin<qint32>(targetVelocity, value + SAFE_REVERSE_RAMP_STEP)
-            : qMax<qint32>(targetVelocity, value - SAFE_REVERSE_RAMP_STEP);
+        ? qMin<qint32>(targetVelocity, value + SAFE_REVERSE_RAMP_STEP)
+        : qMax<qint32>(targetVelocity, value - SAFE_REVERSE_RAMP_STEP);
 
         if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET RAMP_TO_TARGET"))
         {
@@ -671,6 +688,21 @@ bool Tmc6460QtInterface::waitForChipEvent(quint32 eventMask, int timeoutMs)
     return false;
 }
 
+qint16 Tmc6460QtInterface::lowSigned16(quint32 value)
+{
+    return static_cast<qint16>(value & 0xFFFFU);
+}
+
+qint16 Tmc6460QtInterface::highSigned16(quint32 value)
+{
+    return static_cast<qint16>((value >> 16) & 0xFFFFU);
+}
+
+int Tmc6460QtInterface::torqueRawToMilliAmp(qint16 torqueRaw)
+{
+    return qRound(static_cast<double>(torqueRaw) * TORQUE_RAW_TO_MILLIAMP);
+}
+
 QString Tmc6460QtInterface::hex8(quint8 value)
 {
     return QString("0x%1").arg(value, 2, 16, QLatin1Char('0')).toUpper();
@@ -721,5 +753,7 @@ QVector<Tmc6460QtInterface::RegisterValue> Tmc6460QtInterface::readbackTable()
     table.append({REG_FOC_PID_VELOCITY_ACTUAL, 0, "FOC_PID_VELOCITY_ACTUAL"});
     table.append({REG_FOC_PID_POSITION_ACTUAL, 0, "FOC_PID_POSITION_ACTUAL"});
     table.append({REG_FOC_PID_TORQUE_FLUX_ACTUAL, 0, "FOC_PID_TORQUE_FLUX_ACTUAL"});
+    table.append({REG_MCC_ADC_IW_IU, 0, "MCC_ADC_IW_IU"});
+    table.append({REG_MCC_ADC_IV, 0, "MCC_ADC_IV"});
     return table;
 }

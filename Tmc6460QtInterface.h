@@ -30,6 +30,12 @@ public:
         quint32 velocityActual = 0;
         quint32 positionActual = 0;
         quint32 torqueFluxActual = 0;
+        quint32 phaseCurrentUraw = 0;
+        quint32 phaseCurrentVraw = 0;
+        quint32 phaseCurrentWraw = 0;
+        qint16 torqueActualRaw = 0;
+        qint16 fluxActualRaw = 0;
+        int torqueCurrentMilliAmp = 0;
         bool valid = false;
     };
 
@@ -52,6 +58,10 @@ public:
     bool setVelocityTarget(qint32 targetVelocity);
     bool setTorqueTarget(qint32 targetTorque);
     bool emergencyStop();
+
+    static qint16 lowSigned16(quint32 value);
+    static qint16 highSigned16(quint32 value);
+    static int torqueRawToMilliAmp(qint16 torqueRaw);
 
 signals:
     void logMessage(const QString &message);
@@ -85,6 +95,8 @@ private:
     static constexpr quint16 REG_CHIP_STATUS_FLAGS            = 0x0004;
     static constexpr quint16 REG_CHIP_EVENTS                  = 0x0005;
     static constexpr quint16 REG_CHIP_IO_CONFIG               = 0x0008;
+    static constexpr quint16 REG_MCC_ADC_IW_IU                = 0x00C1;
+    static constexpr quint16 REG_MCC_ADC_IV                   = 0x00C2;
     static constexpr quint16 REG_MCC_ADC_CSA_GAIN             = 0x00C3;
     static constexpr quint16 REG_MCC_CONFIG_MOTOR_MOTION      = 0x0100;
     static constexpr quint16 REG_MCC_CONFIG_GDRV              = 0x0101;
@@ -113,6 +125,12 @@ private:
     static constexpr quint32 GDRV_ON_VALUE  = 0x80013431UL;
 
     static constexpr quint32 MOTOR_MOTION_VELOCITY_VALUE = 0x0000E586UL;
+
+    // GUI current conversion. TMC6460 FOC torque actual is a signed raw current-axis value.
+    // Keep this as a project calibration constant because the exact mA/raw depends on
+    // board shunt, CSA gain and motor configuration. For the present 24 V / ~1 A test
+    // actuator, 5000 raw is treated as approximately 1000 mA.
+    static constexpr double TORQUE_RAW_TO_MILLIAMP = 0.2;
 
     QSerialPort serialPort;
     QString errorText;

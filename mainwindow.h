@@ -82,6 +82,13 @@ private:
     QPushButton *applyVelocityButton = nullptr;
     QLabel *velocityValueLabel = nullptr;
 
+    QLabel *currentMilliAmpLabel = nullptr;
+    QLabel *torqueActualRawLabel = nullptr;
+    QLabel *fluxActualRawLabel = nullptr;
+    QLabel *phaseUrawLabel = nullptr;
+    QLabel *phaseVrawLabel = nullptr;
+    QLabel *phaseWrawLabel = nullptr;
+
     QPushButton *estopButton = nullptr;
     QTextEdit *logText = nullptr;
 
@@ -101,6 +108,7 @@ private:
     QWidget *createEstopPanel();
     QWidget *createTorqueGroup();
     QWidget *createVelocityGroup();
+    QWidget *createFeedbackGroup();
     QWidget *createLogGroup();
     void setupConnections();
 
