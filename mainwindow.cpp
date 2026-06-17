@@ -621,7 +621,7 @@ void MainWindow::sendPendingVelocityCommand()
     statusTimer.stop();
     statusRequestPending = false;
 
-    logAction(QString("Velocity target %1 rpm -> raw %2")
+    logAction(QString("Velocity target %1 rpm -- raw %2")
                   .arg(pendingVelocityRpm)
                   .arg(rawVelocity));
 
@@ -644,10 +644,10 @@ void MainWindow::onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runSta
     statusRequestPending = false;
 
     const quint32 statusFlags = runStatus.chipStatusFlags;
-    setStatusText(QString("Connected  STATUS=0x%1")
-                      .arg(statusFlags, 8, 16, QLatin1Char('0'))
-                      .toUpper(),
-                  true);
+    // setStatusText(QString("Connected  STATUS=0x%1")
+    //                   .arg(statusFlags, 8, 16, QLatin1Char('0'))
+    //                   .toUpper(),
+    //               true);
 
     clearError();
 
@@ -656,9 +656,8 @@ void MainWindow::onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runSta
     setFeedbackValue("torque_raw", QString::number(runStatus.torqueActualRaw));
 
     setFeedbackValue("velocity_calc",
-                     QString("%1 rpm (%2 raw)")
-                         .arg(runStatus.velocityActualRpm)
-                         .arg(runStatus.velocityActualRaw));
+                     QString("%1 rpm")
+                         .arg(runStatus.velocityActualRpm));
 
 }
 
