@@ -7,6 +7,11 @@
 #include <QString>
 #include <QTimer>
 
+// Set to 1 to enable software RPM ramping. Set to 0 to write final velocity directly.
+#ifndef TMC6460_ENABLE_VELOCITY_RAMP
+#define TMC6460_ENABLE_VELOCITY_RAMP 1
+#endif
+
 class MotorWorker : public QObject
 {
     Q_OBJECT

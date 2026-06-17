@@ -654,7 +654,12 @@ void MainWindow::onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runSta
     setFeedbackValue("current_mA", QString("%1 mA").arg(runStatus.torqueCurrentMilliAmp));
     setFeedbackValue("flux_raw", QString::number(runStatus.fluxActualRaw));
     setFeedbackValue("torque_raw", QString::number(runStatus.torqueActualRaw));
-    setFeedbackValue("velocity_actual", QString("%1 rpm (%2 raw)").arg(runStatus.velocityActualRpm).arg(runStatus.velocityActualRaw));
+
+    setFeedbackValue("velocity_calc",
+                     QString("%1 rpm (%2 raw)")
+                         .arg(runStatus.velocityActualRpm)
+                         .arg(runStatus.velocityActualRaw));
+
 }
 
 void MainWindow::onWorkerCommandDone(const QString &action, bool ok)
@@ -674,6 +679,28 @@ void MainWindow::onWorkerCommandDone(const QString &action, bool ok)
     {
         statusTimer.start(STATUS_TIMER_MS);
     }
+}
+
+qint32 MainWindow::calculateVelocityFromPosition(quint32 positionActualRaw)
+{
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    qint32 velocityRawPerSecond = 0;
+
+    if (hasLastPositionActual)
+    {
+        const qint64 dtMs = nowMs - lastPositionTimeMs;
+        if (dtMs > 0)
+        {
+            const qint32 positionDelta = static_cast<qint32>(positionActualRaw - lastPositionActualRaw);
+            velocityRawPerSecond = static_cast<qint32>((static_cast<qint64>(positionDelta) * 1000) / dtMs);
+        }
+    }
+
+    lastPositionActualRaw = positionActualRaw;
+    lastPositionTimeMs = nowMs;
+    hasLastPositionActual = true;
+
+    return velocityRawPerSecond;
 }
 
 void MainWindow::appendLog(const QString &message)
@@ -784,6 +811,10 @@ void MainWindow::setConnectedUi(bool connected)
     {
         setFeedbackValue(key, key == "current_mA" ? "-- mA" : "--");
     }
+
+    hasLastPositionActual = false;
+    lastPositionActualRaw = 0;
+    lastPositionTimeMs = 0;
 }
 
 void MainWindow::setStatusText(const QString &text, bool ok)

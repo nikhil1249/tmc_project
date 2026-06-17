@@ -87,21 +87,16 @@ bool Tmc6460QtInterface::initializeMotor()
     }
 
     log("UART communication OK");
-
     log("========== TMC6460 CONFIG WRITE START ==========");
 
     const QVector<RegisterValue> table = configurationTable();
     for (const RegisterValue &entry : table)
     {
-        if (!writeRegisterChecked(entry.address,
-                                  entry.value,
-                                  entry.name,
-                                  true))        // true = print configuration write
+        if (!writeRegisterChecked(entry.address, entry.value, entry.name, true))
         {
             setBusy(false);
             return false;
         }
-
         QThread::msleep(WRITE_SETTLE_MS);
     }
 
@@ -113,10 +108,12 @@ bool Tmc6460QtInterface::initializeMotor()
         return false;
     }
 
-    log("Configuration completed");
+    velocityModePrepared = false;
+    torqueModePrepared = false;
+    lastVelocityCommand = 0;
+    estopActive = false;
 
-    // Print configuration readback once after initialization.
-    // This goes to both UI log and log file through existing logMessage signal.
+    log("Configuration completed");
     readConfiguredRegisters(nullptr);
 
     setBusy(false);
@@ -135,14 +132,16 @@ bool Tmc6460QtInterface::readConfiguredRegisters(QVector<RegisterValue> *valuesO
         quint32 value = 0;
         if (!readRegister(entry.address, &value))
         {
-            log(QString("READ  %-32s [%1] = FAILED").arg(hex16(entry.address)).arg(entry.name));
+            log(QString("READ  %1 [%2] = FAILED")
+                    .arg(QString::fromLatin1(entry.name).leftJustified(32, QLatin1Char(' ')))
+                    .arg(hex16(entry.address)));
             continue;
         }
 
         entry.value = value;
         values.append(entry);
         log(QString("READ  %1 [%2] = %3")
-                .arg(QString::fromLatin1(entry.name), -32)
+                .arg(QString::fromLatin1(entry.name).leftJustified(32, QLatin1Char(' ')))
                 .arg(hex16(entry.address))
                 .arg(hex32(value)));
     }
@@ -197,22 +196,28 @@ bool Tmc6460QtInterface::readRunStatus(RunStatus *status)
     bool ok = true;
 
     // Minimal live feedback read. Keep this short because status polling runs periodically.
-    // Do not read velocity actual or phase-current registers here; velocity is calculated
-    // from POSITION_ACTUAL and phase U/V/W are not shown on the UI.
+    // Velocity actual comes directly from FOC_PID_VELOCITY_ACTUAL [0x0151].
     ok &= readRegister(REG_CHIP_STATUS_FLAGS, &result.chipStatusFlags);
-    ok &= readRegister(REG_FOC_PID_POSITION_ACTUAL, &result.positionActual);
-    ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &result.torqueFluxActual);
 
     quint32 velocityActualReg = 0;
     if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &velocityActualReg))
     {
         result.velocityActualRaw = static_cast<qint32>(velocityActualReg);
         result.velocityActualRpm = velocityRawToRpm(result.velocityActualRaw);
+
+        // Temporary debug print requested for tuning. Status polling is 1 second,
+        // so this prints PID velocity actual once per second.
+        qDebug().noquote() << QString("DEBUG PID_VELOCITY_ACTUAL [0x0151] = %1, rpm=%2")
+                                  .arg(hex32(velocityActualReg))
+                                  .arg(result.velocityActualRpm);
     }
     else
     {
         ok = false;
     }
+
+    ok &= readRegister(REG_FOC_PID_POSITION_ACTUAL, &result.positionActual);
+    ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &result.torqueFluxActual);
 
     result.fluxActualRaw = lowSigned16(result.torqueFluxActual);
     result.torqueActualRaw = highSigned16(result.torqueFluxActual);
@@ -257,10 +262,15 @@ bool Tmc6460QtInterface::prepareVelocityModeForRun()
         QThread::msleep(30);
         estopActive = false;
         velocityModePrepared = false;
+        torqueModePrepared = false;
     }
 
     if (!velocityModePrepared)
     {
+        // TMCL wizard-derived velocity mode value.
+        // Do not clear or write FOC_PID_TORQUE_FLUX_TARGET here.
+        // In this tuned setup, velocity mode runs by switching mode and
+        // then writing only FOC_PID_VELOCITY_TARGET [0x0150].
         if (!writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
                                   MOTOR_MOTION_VELOCITY_VALUE,
                                   "MCC_CONFIG_MOTOR_MOTION VELOCITY",
@@ -270,6 +280,54 @@ bool Tmc6460QtInterface::prepareVelocityModeForRun()
         }
 
         velocityModePrepared = true;
+        torqueModePrepared = false;
+        log(QString("MODE: Velocity, MCC_CONFIG_MOTOR_MOTION=%1")
+                .arg(hex32(MOTOR_MOTION_VELOCITY_VALUE)));
+    }
+
+    return true;
+}
+
+bool Tmc6460QtInterface::prepareTorqueModeForRun()
+{
+    if (estopActive || !driverEnabled)
+    {
+        if (!setDriverEnable(false))
+        {
+            return false;
+        }
+
+        QThread::msleep(DRIVER_TOGGLE_DELAY_MS);
+
+        if (!setDriverEnable(true))
+        {
+            return false;
+        }
+
+        QThread::msleep(30);
+        estopActive = false;
+        velocityModePrepared = false;
+        torqueModePrepared = false;
+    }
+
+    if (!torqueModePrepared)
+    {
+        // TMCL wizard-derived torque mode value.
+        // Do not clear FOC_PID_TORQUE_FLUX_TARGET here. Torque mode runs by
+        // switching mode and then writing torque in upper 16 bits of [0x014E].
+        if (!writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
+                                  MOTOR_MOTION_TORQUE_VALUE,
+                                  "MCC_CONFIG_MOTOR_MOTION TORQUE",
+                                  false))
+        {
+            return false;
+        }
+
+        torqueModePrepared = true;
+        velocityModePrepared = false;
+        lastVelocityCommand = 0;
+        log(QString("MODE: Torque, MCC_CONFIG_MOTOR_MOTION=%1")
+                .arg(hex32(MOTOR_MOTION_TORQUE_VALUE)));
     }
 
     return true;
@@ -278,7 +336,7 @@ bool Tmc6460QtInterface::prepareVelocityModeForRun()
 bool Tmc6460QtInterface::writeVelocityTargetImmediate(qint32 targetVelocity, const char *name)
 {
     const quint32 rawValue = static_cast<quint32>(targetVelocity);
-    if (!writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, rawValue, name, false))
+    if (!writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, rawValue, name))
     {
         return false;
     }
@@ -382,6 +440,12 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
     return true;
 }
 
+quint32 Tmc6460QtInterface::makeTorqueFluxTarget(qint16 torqueRaw, qint16 fluxRaw)
+{
+    return (static_cast<quint32>(static_cast<quint16>(torqueRaw)) << 16) |
+           static_cast<quint16>(fluxRaw);
+}
+
 int Tmc6460QtInterface::signOf(qint32 value)
 {
     if (value > 0)
@@ -399,26 +463,22 @@ bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
 {
     setBusy(true);
 
-    log(QString("Torque command = %1").arg(targetTorque));
+    const qint16 torqueRaw = static_cast<qint16>(qBound<qint32>(-32768, targetTorque, 32767));
+    const quint32 targetRegisterValue = makeTorqueFluxTarget(torqueRaw, 0);
 
-    if (estopActive || !driverEnabled)
-    {
-        log("Re-arming driver after E-STOP / disabled state");
-        if (!setDriverEnable(true))
-        {
-            setBusy(false);
-            return false;
-        }
-        QThread::msleep(30);
-        estopActive = false;
-    }
-
-    // upper 16 bits = torque target, lower 16 bits = flux target.
-    const quint32 rawValue = (static_cast<quint32>(static_cast<quint16>(targetTorque)) << 16);
-    const bool ok = writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
-                                         rawValue,
+    // Torque command uses only upper 16 bits. Lower 16 bits/flux is kept zero.
+    const bool ok = prepareTorqueModeForRun() &&
+                    writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
+                                         targetRegisterValue,
                                          "FOC_PID_TORQUE_FLUX_TARGET",
                                          false);
+
+    if (ok)
+    {
+        log(QString("ACTION: Torque target=%1, register=%2")
+                .arg(torqueRaw)
+                .arg(hex32(targetRegisterValue)));
+    }
 
     setBusy(false);
     return ok;
@@ -431,15 +491,16 @@ bool Tmc6460QtInterface::emergencyStop()
     log("E-STOP command");
 
     bool ok = true;
-    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, 0, "FOC_PID_VELOCITY_TARGET STOP", false);
+    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, 0, "FOC_PID_VELOCITY_TARGET STOP");
     lastVelocityCommand = 0;
-    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET, 0, "FOC_PID_TORQUE_FLUX_TARGET STOP", false);
+    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET, 0, "FOC_PID_TORQUE_FLUX_TARGET STOP");
 
     // Keep the safety behavior: disable the gate driver.
     // Next non-zero torque/velocity command will automatically re-arm it.
     ok &= setDriverEnable(false);
     estopActive = true;
     velocityModePrepared = false;
+    torqueModePrepared = false;
 
     setBusy(false);
     return ok;
@@ -624,11 +685,14 @@ bool Tmc6460QtInterface::writeRegister(quint16 address, quint32 value)
     return true;
 }
 
-bool Tmc6460QtInterface::writeRegisterChecked(quint16 address, quint32 value, const char *name, bool logWrite)
+bool Tmc6460QtInterface::writeRegisterChecked(quint16 address,
+                                              quint32 value,
+                                              const char *name,
+                                              bool logWrite)
 {
     if (!writeRegister(address, value))
     {
-        setError(QString("Write %1 failed").arg(name));
+        setError(QString("Write %1 failed").arg(QString::fromLatin1(name)));
         return false;
     }
 
@@ -646,15 +710,15 @@ bool Tmc6460QtInterface::writeRegisterChecked(quint16 address, quint32 value, co
 bool Tmc6460QtInterface::setDriverEnable(bool enable)
 {
     const bool ok = writeRegisterChecked(REG_MCC_CONFIG_GDRV,
-                                                         enable ? GDRV_ON_VALUE : GDRV_OFF_VALUE,
-                                                         enable ? "MCC_CONFIG_GDRV ON" : "MCC_CONFIG_GDRV OFF",
-                                                         false);
+                                         enable ? GDRV_ON_VALUE : GDRV_OFF_VALUE,
+                                         enable ? "MCC_CONFIG_GDRV ON" : "MCC_CONFIG_GDRV OFF");
     if (ok)
     {
         driverEnabled = enable;
         if (!enable)
         {
             velocityModePrepared = false;
+            torqueModePrepared = false;
         }
     }
     return ok;
@@ -742,22 +806,22 @@ QVector<Tmc6460QtInterface::RegisterValue> Tmc6460QtInterface::configurationTabl
         {REG_MCC_CONFIG_MOTOR_MOTION,      MOTOR_MOTION_VELOCITY_VALUE, "MCC_CONFIG_MOTOR_MOTION"},
         {REG_MCC_CONFIG_GDRV,              GDRV_OFF_VALUE, "MCC_CONFIG_GDRV_OFF"},
         {REG_MCC_CONFIG_PWM,               0x00000017UL, "MCC_CONFIG_PWM"},
-        {REG_FOC_PID_CONFIG,               0x00008558UL, "FOC_PID_CONFIG"},
-        {REG_FOC_PID_FLUX_COEFF,           0x01E54C51UL, "FOC_PID_FLUX_COEFF"},
-        {REG_FOC_PID_TORQUE_COEFF,         0x01E54C51UL, "FOC_PID_TORQUE_COEFF"},
+        {REG_FOC_PID_CONFIG,               0x00008508UL, "FOC_PID_CONFIG"},
+        {REG_FOC_PID_FLUX_COEFF,           0x059F3446UL, "FOC_PID_FLUX_COEFF"},
+        {REG_FOC_PID_TORQUE_COEFF,         0x059F3446UL, "FOC_PID_TORQUE_COEFF"},
         {REG_FOC_PID_VELOCITY_COEFF,       0x00640000UL, "FOC_PID_VELOCITY_COEFF"},
-        {REG_FOC_PID_UQ_UD_LIMITS,         0x00001AAAUL, "FOC_PID_UQ_UD_LIMITS"},
+        {REG_FOC_PID_UQ_UD_LIMITS,         0x00002710UL, "FOC_PID_UQ_UD_LIMITS"},
         {REG_FOC_PID_TORQUE_FLUX_LIMITS,   0x13881388UL, "FOC_PID_TORQUE_FLUX_LIMITS"},
         {REG_FEEDBACK_CONF_CH_A,           0x052AAAAAUL, "FEEDBACK_CONF_CH_A"},
         {REG_FEEDBACK_CONF_CH_B,           0x06004000UL, "FEEDBACK_CONF_CH_B"},
-        {REG_FEEDBACK_VELOCITY_FRQ_CONF,   0x001B4F00UL, "FEEDBACK_VELOCITY_FRQ_CONF"},
+        {REG_FEEDBACK_VELOCITY_FRQ_CONF,   0x006D3A00UL, "FEEDBACK_VELOCITY_FRQ_CONF"},
         {REG_FEEDBACK_VELOCITY_PER_CONF,   0xFFF00001UL, "FEEDBACK_VELOCITY_PER_CONF"},
         {REG_FEEDBACK_VELOCITY_PER_FILTER, 0x00000003UL, "FEEDBACK_VELOCITY_PER_FILTER"},
         {REG_FEEDBACK_OUTPUT_CONF,         0x00700001UL, "FEEDBACK_OUTPUT_CONF"},
         {REG_FOC_PID_VELOCITY_LIMIT,       0x7FFFFFFFUL, "FOC_PID_VELOCITY_LIMIT"},
-        {REG_FOC_PID_TORQUE_FLUX_TARGET,   0x07D00000UL, "FOC_PID_TORQUE_FLUX_TARGET"},
+        {REG_FOC_PID_TORQUE_FLUX_TARGET,   0x00000000UL, "FOC_PID_TORQUE_FLUX_TARGET"},
         {REG_FOC_PID_VELOCITY_TARGET,      0x00000000UL, "FOC_PID_VELOCITY_TARGET"},
-        {REG_HALL_MAP_CONFIG,              0x00000000UL, "HALL_MAP_CONFIG"}
+        {REG_HALL_MAP_CONFIG,              0x00000001UL, "HALL_MAP_CONFIG"}
     };
 }
 

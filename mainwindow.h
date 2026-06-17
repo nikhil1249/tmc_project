@@ -67,15 +67,15 @@ private slots:
 private:
     static constexpr const char *DEFAULT_COM_PORT = "COM6";
     static constexpr int DEFAULT_BAUD_RATE = 115200;
-    static constexpr int STATUS_TIMER_MS = 200;
+    static constexpr int STATUS_TIMER_MS = 1000;
     static constexpr int COMMAND_DEBOUNCE_MS = 100;
-    static constexpr int MIN_ALLOWED_VALUE = -15000;
-    static constexpr int MAX_ALLOWED_VALUE =  15000;
+    static constexpr int MIN_ALLOWED_VALUE = -10000000;
+    static constexpr int MAX_ALLOWED_VALUE =  10000000;
     // Velocity UI is now in motor RPM. Before sending to TMC6460, RPM is
     // converted to the internal velocity register value using the Excel fit:
     // rpm = 0.0033 * raw - 0.142
-    static constexpr int DEFAULT_VELMIN_RPM = -5700;
-    static constexpr int DEFAULT_VELMAX_RPM = 5700;
+    static constexpr int DEFAULT_VELMIN_RPM = -13000;
+    static constexpr int DEFAULT_VELMAX_RPM = 13000;
     static constexpr int DEFAULT_TORQUEMIN_VALUE = 0;
     static constexpr int DEFAULT_TORQUEMAX_VALUE = 8000;
 
@@ -119,6 +119,10 @@ private:
     bool syncingUi = false;
     bool connectedToController = false;
     bool statusRequestPending = false;
+
+    quint32 lastPositionActualRaw = 0;
+    qint64 lastPositionTimeMs = 0;
+    bool hasLastPositionActual = false;
 
     void buildUi();
     void applyStyleSheet();

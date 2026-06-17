@@ -92,8 +92,18 @@ void MotorWorker::readStatus()
 void MotorWorker::applyTorque(int value)
 {
     ensureInterface();
+
+    // Torque command takes ownership of the controller mode.
+    // Stop any active velocity ramp before switching MCC_CONFIG_MOTOR_MOTION to torque mode.
+    if (velocityRampTimer != nullptr)
+    {
+        velocityRampTimer->stop();
+    }
+    currentCommandedVelocityRpm = 0;
+    targetVelocityRpm = 0;
+
     const bool ok = tmc->isOpen() && tmc->setTorqueTarget(value);
-    emit commandDone(QStringLiteral("Apply torque %1").arg(value), ok);
+    emit commandDone(QStringLiteral("Torque target %1").arg(value), ok);
 }
 
 void MotorWorker::applyVelocityRpm(int rpm)
@@ -107,12 +117,28 @@ void MotorWorker::applyVelocityRpm(int rpm)
         return;
     }
 
+#if TMC6460_ENABLE_VELOCITY_RAMP
     targetVelocityRpm = rpm;
 
     if (!velocityRampTimer->isActive())
     {
         velocityRampTimer->start();
     }
+#else
+    resetVelocityRampState();
+
+    const bool ok = writeVelocityRpm(rpm);
+    if (ok)
+    {
+        currentCommandedVelocityRpm = rpm;
+    }
+
+    emit commandDone(QStringLiteral("Velocity target %1 rpm direct").arg(rpm), ok);
+    if (!ok)
+    {
+        emit errorChanged(QStringLiteral("Velocity direct write failed"));
+    }
+#endif
 }
 
 void MotorWorker::processVelocityRamp()

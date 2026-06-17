@@ -60,6 +60,8 @@ public:
 
     bool setVelocityTarget(qint32 targetVelocity);
     bool setTorqueTarget(qint32 targetTorque);
+    bool prepareVelocityModeForRun();
+    bool prepareTorqueModeForRun();
     bool emergencyStop();
 
     static qint16 lowSigned16(quint32 value);
@@ -74,11 +76,8 @@ public:
 
     static int velocityRawToRpm(qint32 raw)
     {
-        const double rpm =
-            (VELOCITY_RAW_TO_RPM_GAIN * static_cast<double>(raw)) +
-            VELOCITY_RAW_TO_RPM_OFFSET;
-
-        return static_cast<int>(qRound(rpm));
+        return static_cast<int>(qRound((VELOCITY_RAW_TO_RPM_GAIN * static_cast<double>(raw))
+                                       + VELOCITY_RAW_TO_RPM_OFFSET));
     }
 
     static qint32 rpmToVelocityRaw(int rpm)
@@ -149,7 +148,8 @@ private:
     static constexpr quint32 GDRV_OFF_VALUE = 0x80003431UL;
     static constexpr quint32 GDRV_ON_VALUE  = 0x80013431UL;
 
-    static constexpr quint32 MOTOR_MOTION_VELOCITY_VALUE = 0x0000E586UL;
+    static constexpr quint32 MOTOR_MOTION_VELOCITY_VALUE = 0x0000E786UL;
+    static constexpr quint32 MOTOR_MOTION_TORQUE_VALUE   = 0x00002586UL;
 
     // GUI current conversion. TMC6460 FOC torque actual is a signed raw current-axis value.
     // Keep this as a project calibration constant because the exact mA/raw depends on
@@ -163,6 +163,7 @@ private:
     bool driverEnabled = false;
     bool estopActive = false;
     bool velocityModePrepared = false;
+    bool torqueModePrepared = false;
     qint32 lastVelocityCommand = 0;
 
     void setBusy(bool busy);
@@ -175,16 +176,16 @@ private:
 
     bool readRegister(quint16 address, quint32 *value);
     bool writeRegister(quint16 address, quint32 value);
-    bool writeRegisterChecked(quint16 address, quint32 value, const char *name, bool logWrite);
+    bool writeRegisterChecked(quint16 address, quint32 value, const char *name, bool logWrite = false);
 
     bool setDriverEnable(bool enable);
     void quickCheckDriverEvent();
     bool waitForChipEvent(quint32 eventMask, int timeoutMs);
 
-    bool prepareVelocityModeForRun();
     bool writeVelocityTargetImmediate(qint32 targetVelocity, const char *name);
     bool applyVelocityWithSafeReverseRamp(qint32 targetVelocity);
     static int signOf(qint32 value);
+    static quint32 makeTorqueFluxTarget(qint16 torqueRaw, qint16 fluxRaw = 0);
 
     static QString hex8(quint8 value);
     static QString hex16(quint16 value);
