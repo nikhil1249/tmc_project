@@ -87,18 +87,25 @@ bool Tmc6460QtInterface::initializeMotor()
     }
 
     log("UART communication OK");
-    log("Writing TMC6460 motor configuration...");
+
+    log("========== TMC6460 CONFIG WRITE START ==========");
 
     const QVector<RegisterValue> table = configurationTable();
     for (const RegisterValue &entry : table)
     {
-        if (!writeRegisterChecked(entry.address, entry.value, entry.name))
+        if (!writeRegisterChecked(entry.address,
+                                  entry.value,
+                                  entry.name,
+                                  true))        // true = print configuration write
         {
             setBusy(false);
             return false;
         }
+
         QThread::msleep(WRITE_SETTLE_MS);
     }
+
+    log("=========== TMC6460 CONFIG WRITE END ===========");
 
     if (!setDriverEnable(false))
     {
@@ -107,6 +114,9 @@ bool Tmc6460QtInterface::initializeMotor()
     }
 
     log("Configuration completed");
+
+    // Print configuration readback once after initialization.
+    // This goes to both UI log and log file through existing logMessage signal.
     readConfiguredRegisters(nullptr);
 
     setBusy(false);
@@ -186,37 +196,22 @@ bool Tmc6460QtInterface::readRunStatus(RunStatus *status)
     RunStatus result;
     bool ok = true;
 
+    // Minimal live feedback read. Keep this short because status polling runs periodically.
+    // Do not read velocity actual or phase-current registers here; velocity is calculated
+    // from POSITION_ACTUAL and phase U/V/W are not shown on the UI.
     ok &= readRegister(REG_CHIP_STATUS_FLAGS, &result.chipStatusFlags);
-    ok &= readRegister(REG_CHIP_EVENTS, &result.chipEvents);
-    ok &= readRegister(REG_MCC_CONFIG_MOTOR_MOTION, &result.motorMotion);
-    ok &= readRegister(REG_MCC_CONFIG_GDRV, &result.gdrv);
-    ok &= readRegister(REG_FOC_PID_VELOCITY_TARGET, &result.velocityTarget);
-    ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_TARGET, &result.torqueFluxTarget);
+    ok &= readRegister(REG_FOC_PID_POSITION_ACTUAL, &result.positionActual);
+    ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &result.torqueFluxActual);
 
     quint32 velocityActualReg = 0;
     if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &velocityActualReg))
     {
-        result.velocityActualraw = static_cast<qint32>(velocityActualReg);
+        result.velocityActualRaw = static_cast<qint32>(velocityActualReg);
+        result.velocityActualRpm = velocityRawToRpm(result.velocityActualRaw);
     }
     else
     {
         ok = false;
-    }
-
-    ok &= readRegister(REG_FOC_PID_POSITION_ACTUAL, &result.positionActual);
-    ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &result.torqueFluxActual);
-
-    quint32 iwIu = 0;
-    quint32 iv = 0;
-    if (readRegister(REG_MCC_ADC_IW_IU, &iwIu))
-    {
-        result.phaseCurrentUraw = static_cast<quint32>(static_cast<quint16>(iwIu & 0xFFFFU));
-        result.phaseCurrentWraw = static_cast<quint32>(static_cast<quint16>((iwIu >> 16) & 0xFFFFU));
-    }
-
-    if (readRegister(REG_MCC_ADC_IV, &iv))
-    {
-        result.phaseCurrentVraw = static_cast<quint32>(static_cast<quint16>(iv & 0xFFFFU));
     }
 
     result.fluxActualRaw = lowSigned16(result.torqueFluxActual);
@@ -232,12 +227,11 @@ bool Tmc6460QtInterface::setVelocityTarget(qint32 targetVelocity)
 {
     setBusy(true);
 
-    log(QString("Velocity command = %1").arg(targetVelocity));
-
-    // All velocity commands now go through the same helper.
-    // If direction is reversed at speed, the helper ramps to zero, dwells briefly,
-    // then ramps into the opposite direction. This avoids a sudden mechanical jerk.
-    const bool ok = applyVelocityWithSafeReverseRamp(targetVelocity);
+    // The worker already performs RPM ramping. This function must only prepare
+    // velocity mode once, then write the target register. Re-writing MOTOR_MOTION
+    // and checking DRV events at every ramp step creates unnecessary UART traffic.
+    const bool ok = prepareVelocityModeForRun() &&
+                    writeVelocityTargetImmediate(targetVelocity, "FOC_PID_VELOCITY_TARGET");
 
     setBusy(false);
     return ok;
@@ -246,12 +240,8 @@ bool Tmc6460QtInterface::setVelocityTarget(qint32 targetVelocity)
 
 bool Tmc6460QtInterface::prepareVelocityModeForRun()
 {
-    // If E-STOP disabled the driver, automatically re-arm the runtime path.
-    // Do not re-run full configuration; only re-enable GDRV and continue.
     if (estopActive || !driverEnabled)
     {
-        log("Re-arming driver after E-STOP / disabled state");
-
         if (!setDriverEnable(false))
         {
             return false;
@@ -266,20 +256,29 @@ bool Tmc6460QtInterface::prepareVelocityModeForRun()
 
         QThread::msleep(30);
         estopActive = false;
+        velocityModePrepared = false;
     }
 
-    // Fast non-blocking diagnostic only. Do not block for 2 seconds before applying velocity.
-    quickCheckDriverEvent();
+    if (!velocityModePrepared)
+    {
+        if (!writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
+                                  MOTOR_MOTION_VELOCITY_VALUE,
+                                  "MCC_CONFIG_MOTOR_MOTION VELOCITY",
+                                  false))
+        {
+            return false;
+        }
 
-    return writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
-                                MOTOR_MOTION_VELOCITY_VALUE,
-                                "MCC_CONFIG_MOTOR_MOTION VELOCITY");
+        velocityModePrepared = true;
+    }
+
+    return true;
 }
 
 bool Tmc6460QtInterface::writeVelocityTargetImmediate(qint32 targetVelocity, const char *name)
 {
     const quint32 rawValue = static_cast<quint32>(targetVelocity);
-    if (!writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, rawValue, name))
+    if (!writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, rawValue, name, false))
     {
         return false;
     }
@@ -324,8 +323,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
             while (value != 0)
             {
                 value = (value > 0)
-                ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
-                : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
+                    ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
+                    : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
 
                 if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET SOFT_STOP"))
                 {
@@ -348,8 +347,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
     while (value != 0)
     {
         value = (value > 0)
-        ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
-        : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
+            ? qMax<qint32>(0, value - SAFE_REVERSE_RAMP_STEP)
+            : qMin<qint32>(0, value + SAFE_REVERSE_RAMP_STEP);
 
         if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET RAMP_TO_ZERO"))
         {
@@ -368,8 +367,8 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
     while (value != targetVelocity)
     {
         value = (targetVelocity > 0)
-        ? qMin<qint32>(targetVelocity, value + SAFE_REVERSE_RAMP_STEP)
-        : qMax<qint32>(targetVelocity, value - SAFE_REVERSE_RAMP_STEP);
+            ? qMin<qint32>(targetVelocity, value + SAFE_REVERSE_RAMP_STEP)
+            : qMax<qint32>(targetVelocity, value - SAFE_REVERSE_RAMP_STEP);
 
         if (!writeVelocityTargetImmediate(value, "FOC_PID_VELOCITY_TARGET RAMP_TO_TARGET"))
         {
@@ -414,13 +413,12 @@ bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
         estopActive = false;
     }
 
-    quickCheckDriverEvent();
-
     // upper 16 bits = torque target, lower 16 bits = flux target.
     const quint32 rawValue = (static_cast<quint32>(static_cast<quint16>(targetTorque)) << 16);
     const bool ok = writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
                                          rawValue,
-                                         "FOC_PID_TORQUE_FLUX_TARGET");
+                                         "FOC_PID_TORQUE_FLUX_TARGET",
+                                         false);
 
     setBusy(false);
     return ok;
@@ -433,14 +431,15 @@ bool Tmc6460QtInterface::emergencyStop()
     log("E-STOP command");
 
     bool ok = true;
-    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, 0, "FOC_PID_VELOCITY_TARGET STOP");
+    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, 0, "FOC_PID_VELOCITY_TARGET STOP", false);
     lastVelocityCommand = 0;
-    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET, 0, "FOC_PID_TORQUE_FLUX_TARGET STOP");
+    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET, 0, "FOC_PID_TORQUE_FLUX_TARGET STOP", false);
 
     // Keep the safety behavior: disable the gate driver.
     // Next non-zero torque/velocity command will automatically re-arm it.
     ok &= setDriverEnable(false);
     estopActive = true;
+    velocityModePrepared = false;
 
     setBusy(false);
     return ok;
@@ -456,7 +455,6 @@ void Tmc6460QtInterface::setError(const QString &message)
     errorText = message;
     qWarning().noquote() << message;
     emit errorChanged(message);
-    emit logMessage(QString("ERROR: %1").arg(message));
 }
 
 void Tmc6460QtInterface::log(const QString &message)
@@ -626,17 +624,20 @@ bool Tmc6460QtInterface::writeRegister(quint16 address, quint32 value)
     return true;
 }
 
-bool Tmc6460QtInterface::writeRegisterChecked(quint16 address, quint32 value, const char *name)
+bool Tmc6460QtInterface::writeRegisterChecked(quint16 address, quint32 value, const char *name, bool logWrite)
 {
-    log(QString("WRITE %1 [%2] = %3")
-            .arg(QString::fromLatin1(name), -32)
-            .arg(hex16(address))
-            .arg(hex32(value)));
-
     if (!writeRegister(address, value))
     {
         setError(QString("Write %1 failed").arg(name));
         return false;
+    }
+
+    if (logWrite)
+    {
+        log(QString("WRITE %1 [%2] = %3")
+                .arg(QString::fromLatin1(name).leftJustified(32, QLatin1Char(' ')))
+                .arg(hex16(address))
+                .arg(hex32(value)));
     }
 
     return true;
@@ -645,11 +646,16 @@ bool Tmc6460QtInterface::writeRegisterChecked(quint16 address, quint32 value, co
 bool Tmc6460QtInterface::setDriverEnable(bool enable)
 {
     const bool ok = writeRegisterChecked(REG_MCC_CONFIG_GDRV,
-                                         enable ? GDRV_ON_VALUE : GDRV_OFF_VALUE,
-                                         enable ? "MCC_CONFIG_GDRV ON" : "MCC_CONFIG_GDRV OFF");
+                                                         enable ? GDRV_ON_VALUE : GDRV_OFF_VALUE,
+                                                         enable ? "MCC_CONFIG_GDRV ON" : "MCC_CONFIG_GDRV OFF",
+                                                         false);
     if (ok)
     {
         driverEnabled = enable;
+        if (!enable)
+        {
+            velocityModePrepared = false;
+        }
     }
     return ok;
 }

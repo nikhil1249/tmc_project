@@ -3,9 +3,11 @@
 
 #include "Tmc6460QtInterface.h"
 
+#include <QFile>
+#include <QHash>
 #include <QMainWindow>
+#include <QThread>
 #include <QTimer>
-#include <QString>
 
 class QLabel;
 class QPushButton;
@@ -14,6 +16,8 @@ class QSpinBox;
 class QTextEdit;
 class QLineEdit;
 class QWidget;
+class QGridLayout;
+class MotorWorker;
 
 class MainWindow : public QMainWindow
 {
@@ -21,7 +25,15 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow() override = default;
+    ~MainWindow() override;
+
+signals:
+    void workerConnectAndInitialize(const QString &portName, int baudRate);
+    void workerReadStatus();
+    void workerApplyTorque(int value);
+    void workerApplyVelocityRpm(int rpm);
+    void workerEmergencyStop();
+    void workerShutdown();
 
 private slots:
     void connectAndInitialize();
@@ -44,22 +56,31 @@ private slots:
     void sendPendingTorqueCommand();
     void sendPendingVelocityCommand();
     void updateChipStatus();
+
+    void onWorkerConnected(bool ok, quint32 chipId, const QString &message);
+    void onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runStatus);
+    void onWorkerCommandDone(const QString &action, bool ok);
+
     void appendLog(const QString &message);
     void showError(const QString &message);
 
 private:
     static constexpr const char *DEFAULT_COM_PORT = "COM6";
     static constexpr int DEFAULT_BAUD_RATE = 115200;
-    static constexpr int STATUS_TIMER_MS = 1000;
+    static constexpr int STATUS_TIMER_MS = 200;
     static constexpr int COMMAND_DEBOUNCE_MS = 100;
-    static constexpr int MIN_ALLOWED_VALUE = -10000000;
-    static constexpr int MAX_ALLOWED_VALUE =  10000000;
-    static constexpr int DEFAULT_VELMIN_VALUE = -4000000;
-    static constexpr int DEFAULT_VELMAX_VALUE = 4000000;
+    static constexpr int MIN_ALLOWED_VALUE = -15000;
+    static constexpr int MAX_ALLOWED_VALUE =  15000;
+    // Velocity UI is now in motor RPM. Before sending to TMC6460, RPM is
+    // converted to the internal velocity register value using the Excel fit:
+    // rpm = 0.0033 * raw - 0.142
+    static constexpr int DEFAULT_VELMIN_RPM = -5700;
+    static constexpr int DEFAULT_VELMAX_RPM = 5700;
     static constexpr int DEFAULT_TORQUEMIN_VALUE = 0;
     static constexpr int DEFAULT_TORQUEMAX_VALUE = 8000;
 
-    Tmc6460QtInterface tmc;
+    QThread workerThread;
+    MotorWorker *worker = nullptr;
 
     QLineEdit *portEdit = nullptr;
     QPushButton *connectButton = nullptr;
@@ -83,43 +104,50 @@ private:
     QPushButton *applyVelocityButton = nullptr;
     QLabel *velocityValueLabel = nullptr;
 
-    QLabel *currentMilliAmpLabel = nullptr;
-    QLabel *velocityActualRawLabel = nullptr;
-    QLabel *torqueActualRawLabel = nullptr;
-    QLabel *fluxActualRawLabel = nullptr;
-    QLabel *phaseUrawLabel = nullptr;
-    QLabel *phaseVrawLabel = nullptr;
-    QLabel *phaseWrawLabel = nullptr;
+    QHash<QString, QLabel *> feedbackLabels;
 
     QPushButton *estopButton = nullptr;
     QTextEdit *logText = nullptr;
+    QFile logFile;
 
     QTimer statusTimer;
     QTimer torqueCommandTimer;
     QTimer velocityCommandTimer;
 
     int pendingTorque = 0;
-    int pendingVelocity = 0;
+    int pendingVelocityRpm = 0;
     bool syncingUi = false;
+    bool connectedToController = false;
+    bool statusRequestPending = false;
 
     void buildUi();
     void applyStyleSheet();
-    QWidget *createConnectionGroup();
-    QWidget *createStatusAndEstopRow();
+    QWidget *createTopConnectionRow();
     QWidget *createChipStatusGroup();
-    QWidget *createEstopPanel();
     QWidget *createTorqueGroup();
     QWidget *createVelocityGroup();
-    QWidget *createFeedbackGroup();
+    QWidget *createLiveFeedbackPanel();
     QWidget *createLogGroup();
     void setupConnections();
+    void setupWorkerThread();
+    void setupLogFile();
+
+    QLabel *addFeedbackItem(QGridLayout *layout,
+                            const QString &key,
+                            const QString &title,
+                            int row,
+                            int columnPair,
+                            const QString &defaultValue = "--");
+    void setFeedbackValue(const QString &key, const QString &value);
 
     void scheduleTorqueCommand(int value);
-    void scheduleVelocityCommand(int value);
-    void updateRange(QSpinBox *minSpin, QSpinBox *maxSpin, QSlider *slider, QSpinBox *directSpin, QLabel *valueLabel);
+    void scheduleVelocityCommand(int rpm);
+    void updateRange(QSpinBox *minSpin, QSpinBox *maxSpin, QSlider *slider, QSpinBox *directSpin, QLabel *valueLabel, const QString &suffix = QString());
     void setConnectedUi(bool connected);
     void setStatusText(const QString &text, bool ok);
     void clearError();
+    void logAction(const QString &action);
+    qint32 calculateVelocityFromPosition(quint32 positionActualRaw);
 };
 
 #endif

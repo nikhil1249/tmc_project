@@ -5,6 +5,8 @@
 #include <QSerialPort>
 #include <QString>
 #include <QVector>
+#include <QMetaType>
+#include <QtGlobal>
 #include <cstdint>
 
 class Tmc6460QtInterface : public QObject
@@ -27,7 +29,8 @@ public:
         quint32 gdrv = 0;
         quint32 velocityTarget = 0;
         quint32 torqueFluxTarget = 0;
-        quint32 velocityActualraw = 0;
+        qint32 velocityActualRaw = 0;
+        int velocityActualRpm = 0;
         quint32 positionActual = 0;
         quint32 torqueFluxActual = 0;
         quint32 phaseCurrentUraw = 0;
@@ -62,6 +65,28 @@ public:
     static qint16 lowSigned16(quint32 value);
     static qint16 highSigned16(quint32 value);
     static int torqueRawToMilliAmp(qint16 torqueRaw);
+
+    // Excel-derived velocity calibration:
+    // rpm = 0.0033 * raw - 0.142
+    // raw = (rpm + 0.142) / 0.0033
+    static constexpr double VELOCITY_RAW_TO_RPM_GAIN = 0.0033;
+    static constexpr double VELOCITY_RAW_TO_RPM_OFFSET = -0.142;
+
+    static int velocityRawToRpm(qint32 raw)
+    {
+        const double rpm =
+            (VELOCITY_RAW_TO_RPM_GAIN * static_cast<double>(raw)) +
+            VELOCITY_RAW_TO_RPM_OFFSET;
+
+        return static_cast<int>(qRound(rpm));
+    }
+
+    static qint32 rpmToVelocityRaw(int rpm)
+    {
+        const double raw = (static_cast<double>(rpm) - VELOCITY_RAW_TO_RPM_OFFSET)
+                           / VELOCITY_RAW_TO_RPM_GAIN;
+        return static_cast<qint32>(qRound(raw));
+    }
 
 signals:
     void logMessage(const QString &message);
@@ -137,6 +162,7 @@ private:
     bool busBusy = false;
     bool driverEnabled = false;
     bool estopActive = false;
+    bool velocityModePrepared = false;
     qint32 lastVelocityCommand = 0;
 
     void setBusy(bool busy);
@@ -149,7 +175,7 @@ private:
 
     bool readRegister(quint16 address, quint32 *value);
     bool writeRegister(quint16 address, quint32 value);
-    bool writeRegisterChecked(quint16 address, quint32 value, const char *name);
+    bool writeRegisterChecked(quint16 address, quint32 value, const char *name, bool logWrite);
 
     bool setDriverEnable(bool enable);
     void quickCheckDriverEvent();
@@ -167,5 +193,7 @@ private:
     static QVector<RegisterValue> configurationTable();
     static QVector<RegisterValue> readbackTable();
 };
+
+Q_DECLARE_METATYPE(Tmc6460QtInterface::RunStatus)
 
 #endif
