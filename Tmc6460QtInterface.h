@@ -65,6 +65,7 @@ public:
     bool prepareVelocityModeForRun();
     bool prepareTorqueModeForRun();
     bool emergencyStop();
+    bool shutdownMotorSafe();
     bool holdAfterStall();
     void debugReadRunRegistersOnce();
 

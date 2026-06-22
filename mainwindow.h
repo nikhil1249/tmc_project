@@ -36,6 +36,9 @@ signals:
     void workerEmergencyStop();
     void workerShutdown();
 
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private slots:
     void connectAndInitialize();
 
@@ -89,6 +92,7 @@ private:
     static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 3000;
 
     QThread workerThread;
+    bool shutdownDone = false;
     MotorWorker *worker = nullptr;
 
     QLineEdit *portEdit = nullptr;

@@ -25,6 +25,10 @@ MotorWorker::~MotorWorker()
 
     if (tmc != nullptr)
     {
+        if (tmc->isOpen())
+        {
+            tmc->shutdownMotorSafe();
+        }
         tmc->closePort();
     }
 }
@@ -291,6 +295,13 @@ void MotorWorker::shutdown()
 
     if (tmc != nullptr)
     {
+        if (tmc->isOpen())
+        {
+            emit logMessage(QStringLiteral("ACTION: GUI closing, safe motor shutdown requested"));
+            const bool ok = tmc->shutdownMotorSafe();
+            emit commandDone(QStringLiteral("GUI close shutdown"), ok);
+        }
+
         tmc->closePort();
     }
 }

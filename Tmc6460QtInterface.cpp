@@ -609,6 +609,61 @@ bool Tmc6460QtInterface::holdAfterStall()
     return ok;
 }
 
+
+bool Tmc6460QtInterface::shutdownMotorSafe()
+{
+    setBusy(true);
+
+    log("SHUTDOWN: Safe motor shutdown started");
+
+    bool ok = true;
+
+    // Stop all active command targets first.
+    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
+                               0x00000000UL,
+                               "FOC_PID_VELOCITY_TARGET ZERO",
+                               false);
+
+    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
+                               0x00000000UL,
+                               "FOC_PID_TORQUE_FLUX_TARGET ZERO",
+                               false);
+
+    // Remove torque/flux limit so the controller cannot keep holding current
+    // after the GUI is closed. During next initialization this is restored to
+    // the Python/default value 0x0BB80BB8.
+    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_LIMITS,
+                               0x00000000UL,
+                               "FOC_PID_TORQUE_FLUX_LIMITS ZERO",
+                               false);
+
+    // Put motion controller back to the Python idle/PWM_ON state.
+    ok &= writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
+                               MOTOR_MOTION_IDLE_VALUE,
+                               "MCC_CONFIG_MOTOR_MOTION IDLE",
+                               false);
+
+    QThread::msleep(100);
+
+    // Finally disable the gate driver.
+    ok &= writeRegisterChecked(REG_MCC_CONFIG_GDRV,
+                               GDRV_OFF_VALUE,
+                               "MCC_CONFIG_GDRV OFF",
+                               false);
+
+    lastVelocityCommand = 0;
+    velocityModePrepared = false;
+    torqueModePrepared = false;
+    driverEnabled = false;
+    estopActive = true;
+
+    log(ok ? "SHUTDOWN: Safe motor shutdown completed"
+           : "SHUTDOWN: Safe motor shutdown completed with errors");
+
+    setBusy(false);
+    return ok;
+}
+
 bool Tmc6460QtInterface::emergencyStop()
 {
     setBusy(true);

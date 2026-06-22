@@ -2,6 +2,7 @@
 #include "MotorWorker.h"
 
 #include <QApplication>
+#include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -39,15 +40,41 @@ MainWindow::~MainWindow()
     torqueCommandTimer.stop();
     velocityCommandTimer.stop();
 
-    emit workerShutdown();
+    if (!shutdownDone && worker != nullptr && workerThread.isRunning())
+    {
+        shutdownDone = true;
+        QMetaObject::invokeMethod(worker,
+                                  "shutdown",
+                                  Qt::BlockingQueuedConnection);
+    }
+
     workerThread.quit();
-    workerThread.wait(1500);
+    workerThread.wait(3000);
 
     if (logFile.isOpen())
     {
         logFile.close();
     }
 }
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    statusTimer.stop();
+    torqueCommandTimer.stop();
+    velocityCommandTimer.stop();
+
+    if (!shutdownDone && worker != nullptr && workerThread.isRunning())
+    {
+        shutdownDone = true;
+        appendLog(QStringLiteral("GUI close requested. Sending safe motor shutdown."));
+        QMetaObject::invokeMethod(worker,
+                                  "shutdown",
+                                  Qt::BlockingQueuedConnection);
+    }
+
+    event->accept();
+}
+
 
 void MainWindow::buildUi()
 {

@@ -61,7 +61,7 @@ private:
     static constexpr qint32 MAX_ALLOWED_TORQUE_RAW = 3000;
 
     // Python test.py uses a 5 s settle time and 60% velocity threshold.
-    static constexpr int STALL_SETTLE_TIME_MS = 1000;
+    static constexpr int STALL_SETTLE_TIME_MS = 5000;
     static constexpr double STALL_MIN_VELOCITY_RATIO = 0.60;
     static constexpr qint32 STALL_MIN_TARGET_RAW = 100000;
 
