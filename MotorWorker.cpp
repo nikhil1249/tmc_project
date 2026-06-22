@@ -331,7 +331,7 @@ void MotorWorker::startStallMonitor(qint32 rawVelocity)
     stallTargetVelocityRaw = rawVelocity;
     stallTimer.restart();
 
-    emit stallStateChanged(false,"Monitor");
+    emit stallStateChanged(false,"Monitoring");
                            // QStringLiteral("Monitoring, target raw=%1, stall threshold 60% after 5 s")
                            //     .arg(rawVelocity));
     emit logMessage(QStringLiteral("STALL_MONITOR: started targetRaw=%1 minRaw=%2")

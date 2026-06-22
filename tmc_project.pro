@@ -12,11 +12,13 @@ SOURCES += \
     MotorWorker.cpp \
     Tmc6460QtInterface.cpp \
     main.cpp \
+    VelocityCalibrationDialog.cpp \
     mainwindow.cpp
 
 HEADERS += \
     MotorWorker.h \
     Tmc6460QtInterface.h \
+    VelocityCalibrationDialog.h \
     mainwindow.h
 
 FORMS += \

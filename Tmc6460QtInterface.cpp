@@ -206,9 +206,9 @@ bool Tmc6460QtInterface::readRunStatus(RunStatus *status)
 
         // Temporary debug print requested for tuning. Status polling is 1 second,
         // so this prints PID velocity actual once per second.
-        // qDebug().noquote() << QString("DEBUG PID_VELOCITY_ACTUAL [0x0154] = %1, raw=%2")
-        //                           .arg(hex32(velocityActualReg))
-        //                           .arg(result.velocityActualRaw);
+        qDebug().noquote() << QString("DEBUG PID_VELOCITY_ACTUAL [0x0154] = %1, raw=%2")
+                                  .arg(hex32(velocityActualReg))
+                                  .arg(result.velocityActualRaw);
     }
     else
     {
@@ -472,8 +472,8 @@ void Tmc6460QtInterface::debugReadRunRegistersOnce()
     if (readRegister(REG_FOC_PID_VELOCITY_TARGET, &value))
         log(QString("DEBUG VELOCITY_TARGET [0x0150] = %1").arg(hex32(value)));
 
-    // if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &value))
-    //     log(QString("DEBUG VELOCITY_ACTUAL [%1] = %2").arg(hex16(REG_FOC_PID_VELOCITY_ACTUAL)).arg(hex32(value)));
+    if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &value))
+        log(QString("DEBUG VELOCITY_ACTUAL [%1] = %2").arg(hex16(REG_FOC_PID_VELOCITY_ACTUAL)).arg(hex32(value)));
 
     if (readRegister(REG_FOC_PID_POSITION_ACTUAL, &value))
         log(QString("DEBUG POSITION_ACTUAL [%1] = %2").arg(hex16(REG_FOC_PID_POSITION_ACTUAL)).arg(hex32(value)));
