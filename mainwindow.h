@@ -31,7 +31,7 @@ signals:
     void workerConnectAndInitialize(const QString &portName, int baudRate);
     void workerReadStatus();
     void workerApplyTorque(int value);
-    void workerApplyVelocityRpm(int rpm);
+    void workerApplyVelocityRaw(qint32 rawVelocity);
     void workerEmergencyStop();
     void workerShutdown();
 
@@ -60,6 +60,7 @@ private slots:
     void onWorkerConnected(bool ok, quint32 chipId, const QString &message);
     void onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runStatus);
     void onWorkerCommandDone(const QString &action, bool ok);
+    void onWorkerStallStateChanged(bool stalled, const QString &message);
 
     void appendLog(const QString &message);
     void showError(const QString &message);
@@ -69,15 +70,14 @@ private:
     static constexpr int DEFAULT_BAUD_RATE = 115200;
     static constexpr int STATUS_TIMER_MS = 1000;
     static constexpr int COMMAND_DEBOUNCE_MS = 100;
-    static constexpr int MIN_ALLOWED_VALUE = -400000;
-    static constexpr int MAX_ALLOWED_VALUE =  400000;
-    // Velocity UI is now in motor RPM. Before sending to TMC6460, RPM is
-    // converted to the internal velocity register value using the Excel fit:
-    // rpm = 0.0033 * raw - 0.142
-    static constexpr int DEFAULT_VELMIN_RPM = -5700;
-    static constexpr int DEFAULT_VELMAX_RPM = 5700;
-    static constexpr int DEFAULT_TORQUEMIN_VALUE = -8000;
-    static constexpr int DEFAULT_TORQUEMAX_VALUE = 8000;
+    static constexpr int MIN_ALLOWED_VALUE = -10000000;
+    static constexpr int MAX_ALLOWED_VALUE =  10000000;
+    // Velocity UI uses raw TMC6460 velocity units, same as the Python script.
+    static constexpr int DEFAULT_VELMIN_RAW = -4000000;
+    static constexpr int DEFAULT_VELMAX_RAW = 4000000;
+    static constexpr int DEFAULT_VELOCITY_RAW = 4000000;
+    static constexpr int DEFAULT_TORQUEMIN_VALUE = -3000;
+    static constexpr int DEFAULT_TORQUEMAX_VALUE = 3000;
 
     QThread workerThread;
     MotorWorker *worker = nullptr;
@@ -115,14 +115,10 @@ private:
     QTimer velocityCommandTimer;
 
     int pendingTorque = 0;
-    int pendingVelocityRpm = 0;
+    qint32 pendingVelocityRaw = 0;
     bool syncingUi = false;
     bool connectedToController = false;
     bool statusRequestPending = false;
-
-    quint32 lastPositionActualRaw = 0;
-    qint64 lastPositionTimeMs = 0;
-    bool hasLastPositionActual = false;
 
     void buildUi();
     void applyStyleSheet();
@@ -145,13 +141,12 @@ private:
     void setFeedbackValue(const QString &key, const QString &value);
 
     void scheduleTorqueCommand(int value);
-    void scheduleVelocityCommand(int rpm);
+    void scheduleVelocityCommand(qint32 rawVelocity);
     void updateRange(QSpinBox *minSpin, QSpinBox *maxSpin, QSlider *slider, QSpinBox *directSpin, QLabel *valueLabel, const QString &suffix = QString());
     void setConnectedUi(bool connected);
     void setStatusText(const QString &text, bool ok);
     void clearError();
     void logAction(const QString &action);
-    qint32 calculateVelocityFromPosition(quint32 positionActualRaw);
 };
 
 #endif

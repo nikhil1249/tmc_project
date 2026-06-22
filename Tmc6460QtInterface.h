@@ -9,6 +9,8 @@
 #include <QtGlobal>
 #include <cstdint>
 
+#include "TMC6460_HW_Abstraction.h"
+
 class Tmc6460QtInterface : public QObject
 {
     Q_OBJECT
@@ -30,7 +32,6 @@ public:
         quint32 velocityTarget = 0;
         quint32 torqueFluxTarget = 0;
         qint32 velocityActualRaw = 0;
-        int velocityActualRpm = 0;
         quint32 positionActual = 0;
         quint32 torqueFluxActual = 0;
         quint32 phaseCurrentUraw = 0;
@@ -63,29 +64,12 @@ public:
     bool prepareVelocityModeForRun();
     bool prepareTorqueModeForRun();
     bool emergencyStop();
+    bool holdAfterStall();
+    void debugReadRunRegistersOnce();
 
     static qint16 lowSigned16(quint32 value);
     static qint16 highSigned16(quint32 value);
     static int torqueRawToMilliAmp(qint16 torqueRaw);
-
-    // Excel-derived velocity calibration:
-    // rpm = 0.0033 * raw - 0.142
-    // raw = (rpm + 0.142) / 0.0033
-    static constexpr double VELOCITY_RAW_TO_RPM_GAIN = 0.0033;
-    static constexpr double VELOCITY_RAW_TO_RPM_OFFSET = -0.142;
-
-    static int velocityRawToRpm(qint32 raw)
-    {
-        return static_cast<int>(qRound((VELOCITY_RAW_TO_RPM_GAIN * static_cast<double>(raw))
-                                       + VELOCITY_RAW_TO_RPM_OFFSET));
-    }
-
-    static qint32 rpmToVelocityRaw(int rpm)
-    {
-        const double raw = (static_cast<double>(rpm) - VELOCITY_RAW_TO_RPM_OFFSET)
-                           / VELOCITY_RAW_TO_RPM_GAIN;
-        return static_cast<qint32>(qRound(raw));
-    }
 
 signals:
     void logMessage(const QString &message);
@@ -111,45 +95,55 @@ private:
     static constexpr int SAFE_REVERSE_RAMP_DELAY_MS = 20;
     static constexpr int SAFE_REVERSE_ZERO_DWELL_MS = 120;
 
-    static constexpr quint32 DRIVER_READY_EVENT_MASK = (1UL << 31);
+    static constexpr quint32 DRIVER_READY_EVENT_MASK = TMC6460_CHIP_EVENTS_GDRV_ON_EVENT_MASK;
 
     static constexpr quint32 EXPECTED_CHIP_ID = 0x36343630UL;
 
     static constexpr quint16 REG_CHIP_ID                      = 0x0000;
-    static constexpr quint16 REG_CHIP_STATUS_FLAGS            = 0x0004;
-    static constexpr quint16 REG_CHIP_EVENTS                  = 0x0005;
-    static constexpr quint16 REG_CHIP_IO_CONFIG               = 0x0008;
-    static constexpr quint16 REG_MCC_ADC_IW_IU                = 0x00C1;
-    static constexpr quint16 REG_MCC_ADC_IV                   = 0x00C2;
-    static constexpr quint16 REG_MCC_ADC_CSA_GAIN             = 0x00C3;
-    static constexpr quint16 REG_MCC_CONFIG_MOTOR_MOTION      = 0x0100;
-    static constexpr quint16 REG_MCC_CONFIG_GDRV              = 0x0101;
-    static constexpr quint16 REG_MCC_CONFIG_PWM               = 0x0102;
-    static constexpr quint16 REG_FOC_PID_CONFIG               = 0x0140;
-    static constexpr quint16 REG_FOC_PID_FLUX_COEFF           = 0x0142;
-    static constexpr quint16 REG_FOC_PID_TORQUE_COEFF         = 0x0143;
-    static constexpr quint16 REG_FOC_PID_VELOCITY_COEFF       = 0x0145;
-    static constexpr quint16 REG_FOC_PID_UQ_UD_LIMITS         = 0x0149;
-    static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_LIMITS   = 0x014A;
-    static constexpr quint16 REG_FOC_PID_VELOCITY_LIMIT       = 0x014B;
-    static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_TARGET   = 0x014E;
-    static constexpr quint16 REG_FOC_PID_VELOCITY_TARGET      = 0x0150;
-    static constexpr quint16 REG_FOC_PID_VELOCITY_ACTUAL      = 0x0151;
-    static constexpr quint16 REG_FOC_PID_POSITION_ACTUAL      = 0x0152;
-    static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_ACTUAL   = 0x0153;
-    static constexpr quint16 REG_FEEDBACK_CONF_CH_A           = 0x0240;
-    static constexpr quint16 REG_FEEDBACK_CONF_CH_B           = 0x0241;
-    static constexpr quint16 REG_FEEDBACK_VELOCITY_FRQ_CONF   = 0x0244;
-    static constexpr quint16 REG_FEEDBACK_VELOCITY_PER_CONF   = 0x0245;
-    static constexpr quint16 REG_FEEDBACK_VELOCITY_PER_FILTER = 0x0246;
-    static constexpr quint16 REG_FEEDBACK_OUTPUT_CONF         = 0x0250;
-    static constexpr quint16 REG_HALL_MAP_CONFIG              = 0x0300;
+    static constexpr quint16 REG_CHIP_STATUS_FLAGS            = TMC6460_CHIP_STATUS_FLAGS;
+    static constexpr quint16 REG_CHIP_EVENTS                  = TMC6460_CHIP_EVENTS;
+    static constexpr quint16 REG_CHIP_IO_MATRIX               = TMC6460_CHIP_IO_MATRIX;
+    static constexpr quint16 REG_CHIP_IO_CONFIG               = TMC6460_CHIP_IO_CONFIG;
+    static constexpr quint16 REG_MCC_ADC_IW_IU                = TMC6460_MCC_ADC_IW_IU;
+    static constexpr quint16 REG_MCC_ADC_IV                   = TMC6460_MCC_ADC_IV;
+    static constexpr quint16 REG_MCC_ADC_CSA_GAIN             = TMC6460_MCC_ADC_CSA_GAIN;
+    static constexpr quint16 REG_MCC_CONFIG_MOTOR_MOTION      = TMC6460_MCC_CONFIG_MOTOR_MOTION;
+    static constexpr quint16 REG_MCC_CONFIG_GDRV              = TMC6460_MCC_CONFIG_GDRV;
+    static constexpr quint16 REG_MCC_CONFIG_PWM               = TMC6460_MCC_CONFIG_PWM;
+    static constexpr quint16 REG_FOC_PID_CONFIG               = TMC6460_FOC_PID_CONFIG;
+    static constexpr quint16 REG_FOC_PID_FLUX_COEFF           = TMC6460_FOC_PID_FLUX_COEFF;
+    static constexpr quint16 REG_FOC_PID_TORQUE_COEFF         = TMC6460_FOC_PID_TORQUE_COEFF;
+    static constexpr quint16 REG_FOC_PID_VELOCITY_COEFF       = TMC6460_FOC_PID_VELOCITY_COEFF;
+    static constexpr quint16 REG_FOC_PID_UQ_UD_LIMITS         = TMC6460_FOC_PID_UQ_UD_LIMITS;
+    static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_LIMITS   = TMC6460_FOC_PID_TORQUE_FLUX_LIMITS;
+    static constexpr quint16 REG_FOC_PID_VELOCITY_LIMIT       = TMC6460_FOC_PID_VELOCITY_LIMIT;
+    static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_TARGET   = TMC6460_FOC_PID_TORQUE_FLUX_TARGET;
+    static constexpr quint16 REG_FOC_PID_VELOCITY_TARGET      = TMC6460_FOC_PID_VELOCITY_TARGET;
+    static constexpr quint16 REG_FOC_PID_VELOCITY_ACTUAL      = TMC6460_FOC_PID_VELOCITY_ACTUAL;
+    static constexpr quint16 REG_FOC_PID_POSITION_ACTUAL      = TMC6460_FOC_PID_POSITION_ACTUAL;
+    static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_ACTUAL   = TMC6460_FOC_PID_TORQUE_FLUX_ACTUAL;
+    static constexpr quint16 REG_FEEDBACK_CONF_CH_A           = TMC6460_FEEDBACK_CONF_CH_A;
+    static constexpr quint16 REG_FEEDBACK_CONF_CH_B           = TMC6460_FEEDBACK_CONF_CH_B;
+    static constexpr quint16 REG_FEEDBACK_VELOCITY_FRQ_CONF   = TMC6460_FEEDBACK_VELOCITY_FRQ_CONF;
+    static constexpr quint16 REG_FEEDBACK_VELOCITY_PER_CONF   = TMC6460_FEEDBACK_VELOCITY_PER_CONF;
+    static constexpr quint16 REG_FEEDBACK_VELOCITY_PER_FILTER = TMC6460_FEEDBACK_VELOCITY_PER_FILTER;
+    static constexpr quint16 REG_FEEDBACK_OUTPUT_CONF         = TMC6460_FEEDBACK_OUTPUT_CONF;
+    static constexpr quint16 REG_HALL_MAP_CONFIG              = TMC6460_HALL_MAP_CONFIG;
 
     static constexpr quint32 GDRV_OFF_VALUE = 0x80003431UL;
     static constexpr quint32 GDRV_ON_VALUE  = 0x80013431UL;
 
-    static constexpr quint32 MOTOR_MOTION_VELOCITY_VALUE = 0x0000E786UL;
+    // Values derived from the working Python/TMCL configuration.
+    // IDLE/PWM_ON is written during initialization. Velocity/Torque are written only
+    // when the corresponding GUI command is requested.
+    static constexpr quint32 MOTOR_MOTION_IDLE_VALUE     = 0x00002386UL;
+    static constexpr quint32 MOTOR_MOTION_VELOCITY_VALUE = 0x00002786UL;
     static constexpr quint32 MOTOR_MOTION_TORQUE_VALUE   = 0x00002586UL;
+
+    // Python script limits. Keep GUI/software commands inside these limits.
+    static constexpr qint32 PYTHON_CONST_VELOCITY_RAW = 4000000;
+    static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW  = 4000000;
+    static constexpr qint32 MAX_ALLOWED_TORQUE_RAW    = 3000;
 
     // GUI current conversion. TMC6460 FOC torque actual is a signed raw current-axis value.
     // Keep this as a project calibration constant because the exact mA/raw depends on

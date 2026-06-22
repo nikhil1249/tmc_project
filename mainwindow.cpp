@@ -211,21 +211,21 @@ QWidget *MainWindow::createVelocityGroup()
     layout->setVerticalSpacing(12);
 
     velocityMinSpin = new QSpinBox;
-    velocityMinSpin->setRange(-20000, 20000);
-    velocityMinSpin->setValue(DEFAULT_VELMIN_RPM);
-    velocityMinSpin->setSuffix(" rpm");
+    velocityMinSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
+    velocityMinSpin->setValue(DEFAULT_VELMIN_RAW);
+    velocityMinSpin->setSuffix(" raw");
     velocityMinSpin->setMinimumWidth(130);
 
     velocityMaxSpin = new QSpinBox;
-    velocityMaxSpin->setRange(-20000, 20000);
-    velocityMaxSpin->setValue(DEFAULT_VELMAX_RPM);
-    velocityMaxSpin->setSuffix(" rpm");
+    velocityMaxSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
+    velocityMaxSpin->setValue(DEFAULT_VELMAX_RAW);
+    velocityMaxSpin->setSuffix(" raw");
     velocityMaxSpin->setMinimumWidth(130);
 
     velocityDirectSpin = new QSpinBox;
-    velocityDirectSpin->setRange(DEFAULT_VELMIN_RPM, DEFAULT_VELMAX_RPM);
-    velocityDirectSpin->setValue(0);
-    velocityDirectSpin->setSuffix(" rpm");
+    velocityDirectSpin->setRange(DEFAULT_VELMIN_RAW, DEFAULT_VELMAX_RAW);
+    velocityDirectSpin->setValue(DEFAULT_VELOCITY_RAW);
+    velocityDirectSpin->setSuffix(" raw");
     velocityDirectSpin->setMinimumWidth(150);
     velocityDirectSpin->setKeyboardTracking(false);
 
@@ -233,13 +233,13 @@ QWidget *MainWindow::createVelocityGroup()
     applyVelocityButton->setMinimumWidth(140);
 
     velocitySlider = new QSlider(Qt::Horizontal);
-    velocitySlider->setRange(DEFAULT_VELMIN_RPM, DEFAULT_VELMAX_RPM);
-    velocitySlider->setValue(0);
+    velocitySlider->setRange(DEFAULT_VELMIN_RAW, DEFAULT_VELMAX_RAW);
+    velocitySlider->setValue(DEFAULT_VELOCITY_RAW);
     velocitySlider->setTracking(true);
     velocitySlider->setTickPosition(QSlider::TicksBelow);
     velocitySlider->setTickInterval(500);
 
-    velocityValueLabel = new QLabel("0 rpm");
+    velocityValueLabel = new QLabel(QString("%1 raw").arg(DEFAULT_VELOCITY_RAW));
     velocityValueLabel->setObjectName("blueValueLabel");
     velocityValueLabel->setMinimumWidth(140);
 
@@ -249,7 +249,7 @@ QWidget *MainWindow::createVelocityGroup()
     layout->addWidget(velocityMaxSpin, 0, 3);
     layout->addWidget(new QLabel("Direct Value:"), 0, 4);
     layout->addWidget(velocityDirectSpin, 0, 5);
-    layout->addWidget(new QLabel("RPM"), 0, 6);
+    layout->addWidget(new QLabel("RAW"), 0, 6);
     layout->addWidget(applyVelocityButton, 0, 7);
 
     layout->addWidget(velocitySlider, 1, 0, 1, 6);
@@ -273,6 +273,9 @@ QWidget *MainWindow::createLiveFeedbackPanel()
     addFeedbackItem(layout, "flux_raw", "Flux raw:", 0, 1);
     addFeedbackItem(layout, "velocity_calc", "Velocity actual:", 0, 2);
     addFeedbackItem(layout, "torque_raw", "Torque raw:", 0, 3);
+    addFeedbackItem(layout, "stall_status", "Stall:", 1, 0, "Not active");
+    addFeedbackItem(layout, "position_actual", "Position:", 1, 1);
+    addFeedbackItem(layout, "torque_flux_actual", "Torque/Flux:", 1, 2);
 
     for (int i = 0; i < 8; ++i)
     {
@@ -340,8 +343,8 @@ void MainWindow::setupWorkerThread()
             worker, &MotorWorker::readStatus, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyTorque,
             worker, &MotorWorker::applyTorque, Qt::QueuedConnection);
-    connect(this, &MainWindow::workerApplyVelocityRpm,
-            worker, &MotorWorker::applyVelocityRpm, Qt::QueuedConnection);
+    connect(this, &MainWindow::workerApplyVelocityRaw,
+            worker, &MotorWorker::applyVelocityRaw, Qt::QueuedConnection);
     connect(this, &MainWindow::workerEmergencyStop,
             worker, &MotorWorker::emergencyStop, Qt::QueuedConnection);
     connect(this, &MainWindow::workerShutdown,
@@ -353,6 +356,8 @@ void MainWindow::setupWorkerThread()
             this, &MainWindow::onWorkerStatusReady, Qt::QueuedConnection);
     connect(worker, &MotorWorker::commandDone,
             this, &MainWindow::onWorkerCommandDone, Qt::QueuedConnection);
+    connect(worker, &MotorWorker::stallStateChanged,
+            this, &MainWindow::onWorkerStallStateChanged, Qt::QueuedConnection);
     connect(worker, &MotorWorker::logMessage,
             this, &MainWindow::appendLog, Qt::QueuedConnection);
     connect(worker, &MotorWorker::errorChanged,
@@ -439,6 +444,9 @@ void MainWindow::setFeedbackValue(const QString &key, const QString &value)
 
 void MainWindow::connectAndInitialize()
 {
+    statusTimer.stop();
+    statusRequestPending = false;
+
     clearError();
     logAction(QString("Connect + Initialize requested on %1").arg(portEdit->text().trimmed()));
 
@@ -506,18 +514,18 @@ void MainWindow::onTorqueRangeChanged()
     updateRange(torqueMinSpin, torqueMaxSpin, torqueSlider, torqueDirectSpin, torqueValueLabel);
 }
 
-void MainWindow::onVelocitySliderValueChanged(int rpm)
+void MainWindow::onVelocitySliderValueChanged(int rawVelocity)
 {
     if (syncingUi)
     {
         return;
     }
 
-    pendingVelocityRpm = rpm;
-    velocityValueLabel->setText(QString("%1 rpm").arg(rpm));
+    pendingVelocityRaw = rawVelocity;
+    velocityValueLabel->setText(QString("%1 raw").arg(rawVelocity));
 
     QSignalBlocker blocker(velocityDirectSpin);
-    velocityDirectSpin->setValue(rpm);
+    velocityDirectSpin->setValue(rawVelocity);
 }
 
 void MainWindow::onVelocitySliderReleased()
@@ -525,18 +533,18 @@ void MainWindow::onVelocitySliderReleased()
     scheduleVelocityCommand(velocitySlider->value());
 }
 
-void MainWindow::onVelocityDirectValueChanged(int rpm)
+void MainWindow::onVelocityDirectValueChanged(int rawVelocity)
 {
     if (syncingUi)
     {
         return;
     }
 
-    pendingVelocityRpm = rpm;
+    pendingVelocityRaw = rawVelocity;
 
     QSignalBlocker blocker(velocitySlider);
-    velocitySlider->setValue(rpm);
-    velocityValueLabel->setText(QString("%1 rpm").arg(rpm));
+    velocitySlider->setValue(rawVelocity);
+    velocityValueLabel->setText(QString("%1 raw").arg(rawVelocity));
 }
 
 void MainWindow::onVelocityDirectEditingFinished()
@@ -551,7 +559,7 @@ void MainWindow::onApplyVelocityClicked()
 
 void MainWindow::onVelocityRangeChanged()
 {
-    updateRange(velocityMinSpin, velocityMaxSpin, velocitySlider, velocityDirectSpin, velocityValueLabel, QStringLiteral(" rpm"));
+    updateRange(velocityMinSpin, velocityMaxSpin, velocitySlider, velocityDirectSpin, velocityValueLabel, QStringLiteral(" raw"));
 }
 
 void MainWindow::onEstopClicked()
@@ -575,7 +583,7 @@ void MainWindow::onEstopClicked()
     syncingUi = false;
 
     torqueValueLabel->setText("0");
-    velocityValueLabel->setText("0 rpm");
+    velocityValueLabel->setText("0 raw");
 
     logAction("E-STOP requested");
     emit workerEmergencyStop();
@@ -591,18 +599,26 @@ void MainWindow::scheduleTorqueCommand(int value)
         return;
     }
 
-    pendingTorque = value;
+    pendingTorque = qBound(DEFAULT_TORQUEMIN_VALUE, value, DEFAULT_TORQUEMAX_VALUE);
     torqueCommandTimer.start(COMMAND_DEBOUNCE_MS);
 }
 
-void MainWindow::scheduleVelocityCommand(int rpm)
+void MainWindow::scheduleVelocityCommand(qint32 rawVelocity)
 {
     if (!connectedToController)
     {
         return;
     }
 
-    pendingVelocityRpm = rpm;
+    pendingVelocityRaw = qBound<qint32>(DEFAULT_VELMIN_RAW, rawVelocity, DEFAULT_VELMAX_RAW);
+
+    // Clear any previously latched stall/error indication as soon as a new
+    // velocity command is requested. The worker will emit a fresh
+    // "Monitoring..." or "STALL DETECTED..." state after the command.
+    clearError();
+    setFeedbackValue("stall_status", pendingVelocityRaw == 0 ? "Not active" : "Commanding...");
+    setStatusText(pendingVelocityRaw == 0 ? "Connected" : "Commanding velocity", true);
+
     velocityCommandTimer.start(COMMAND_DEBOUNCE_MS);
 }
 
@@ -614,18 +630,17 @@ void MainWindow::sendPendingTorqueCommand()
 
 void MainWindow::sendPendingVelocityCommand()
 {
-    const qint32 rawVelocity = Tmc6460QtInterface::rpmToVelocityRaw(pendingVelocityRpm);
+    const qint32 rawVelocity = pendingVelocityRaw;
 
-    // Avoid status polling while the ramp is writing velocity targets.
+    // Avoid status polling while the optional ramp is writing velocity targets.
     // This keeps the UART stream clean and prevents partial/stale replies.
     statusTimer.stop();
     statusRequestPending = false;
 
-    logAction(QString("Velocity target %1 rpm -- raw %2")
-                  .arg(pendingVelocityRpm)
+    logAction(QString("Velocity target raw=%1")
                   .arg(rawVelocity));
 
-    emit workerApplyVelocityRpm(pendingVelocityRpm);
+    emit workerApplyVelocityRaw(rawVelocity);
 }
 
 void MainWindow::updateChipStatus()
@@ -643,7 +658,7 @@ void MainWindow::onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runSta
 {
     statusRequestPending = false;
 
-    const quint32 statusFlags = runStatus.chipStatusFlags;
+    // const quint32 statusFlags = runStatus.chipStatusFlags;
     // setStatusText(QString("Connected  STATUS=0x%1")
     //                   .arg(statusFlags, 8, 16, QLatin1Char('0'))
     //                   .toUpper(),
@@ -654,10 +669,15 @@ void MainWindow::onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runSta
     setFeedbackValue("current_mA", QString("%1 mA").arg(runStatus.torqueCurrentMilliAmp));
     setFeedbackValue("flux_raw", QString::number(runStatus.fluxActualRaw));
     setFeedbackValue("torque_raw", QString::number(runStatus.torqueActualRaw));
+    setFeedbackValue("position_actual", QString::number(runStatus.positionActual));
+    setFeedbackValue("torque_flux_actual",
+                     QString("0x%1")
+                         .arg(runStatus.torqueFluxActual, 8, 16, QLatin1Char('0'))
+                         .toUpper());
 
     setFeedbackValue("velocity_calc",
-                     QString("%1 rpm")
-                         .arg(runStatus.velocityActualRpm));
+                     QString("%1 raw")
+                         .arg(runStatus.velocityActualRaw));
 
 }
 
@@ -680,26 +700,31 @@ void MainWindow::onWorkerCommandDone(const QString &action, bool ok)
     }
 }
 
-qint32 MainWindow::calculateVelocityFromPosition(quint32 positionActualRaw)
+void MainWindow::onWorkerStallStateChanged(bool stalled, const QString &message)
 {
-    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    qint32 velocityRawPerSecond = 0;
+    setFeedbackValue("stall_status", message);
 
-    if (hasLastPositionActual)
+    if (stalled)
     {
-        const qint64 dtMs = nowMs - lastPositionTimeMs;
-        if (dtMs > 0)
-        {
-            const qint32 positionDelta = static_cast<qint32>(positionActualRaw - lastPositionActualRaw);
-            velocityRawPerSecond = static_cast<qint32>((static_cast<qint64>(positionDelta) * 1000) / dtMs);
-        }
+        setStatusText("STALL DETECTED", false);
+        showError(message);
+        return;
     }
 
-    lastPositionActualRaw = positionActualRaw;
-    lastPositionTimeMs = nowMs;
-    hasLastPositionActual = true;
+    // A new command or a successful command must clear the old latched
+    // red "STALL DETECTED" status. Previously only the small Stall field
+    // changed to "Monitoring", while the main Status badge stayed red.
+    clearError();
 
-    return velocityRawPerSecond;
+    if (message.startsWith(QStringLiteral("Monitoring"), Qt::CaseInsensitive) ||
+        message.startsWith(QStringLiteral("Commanding"), Qt::CaseInsensitive))
+    {
+        setStatusText("Motor running", true);
+    }
+    else if (connectedToController)
+    {
+        setStatusText("Connected", true);
+    }
 }
 
 void MainWindow::appendLog(const QString &message)
@@ -808,12 +833,14 @@ void MainWindow::setConnectedUi(bool connected)
     const QStringList keys = feedbackLabels.keys();
     for (const QString &key : keys)
     {
-        setFeedbackValue(key, key == "current_mA" ? "-- mA" : "--");
+        if (key == "current_mA")
+            setFeedbackValue(key, "-- mA");
+        else if (key == "stall_status")
+            setFeedbackValue(key, "Not active");
+        else
+            setFeedbackValue(key, "--");
     }
 
-    hasLastPositionActual = false;
-    lastPositionActualRaw = 0;
-    lastPositionTimeMs = 0;
 }
 
 void MainWindow::setStatusText(const QString &text, bool ok)
