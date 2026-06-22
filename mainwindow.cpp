@@ -232,6 +232,17 @@ QWidget *MainWindow::createVelocityGroup()
     applyVelocityButton = new QPushButton("Apply Velocity");
     applyVelocityButton->setMinimumWidth(140);
 
+    velocityTorqueLimitSpin = new QSpinBox;
+    velocityTorqueLimitSpin->setRange(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
+                                      DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
+    velocityTorqueLimitSpin->setValue(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW);
+    velocityTorqueLimitSpin->setSuffix(" raw");
+    velocityTorqueLimitSpin->setMinimumWidth(150);
+    velocityTorqueLimitSpin->setKeyboardTracking(false);
+
+    applyVelocityTorqueLimitButton = new QPushButton("Apply Torque Limit");
+    applyVelocityTorqueLimitButton->setMinimumWidth(160);
+
     velocitySlider = new QSlider(Qt::Horizontal);
     velocitySlider->setRange(DEFAULT_VELMIN_RAW, DEFAULT_VELMAX_RAW);
     velocitySlider->setValue(DEFAULT_VELOCITY_RAW);
@@ -242,6 +253,10 @@ QWidget *MainWindow::createVelocityGroup()
     velocityValueLabel = new QLabel(QString("%1 raw").arg(DEFAULT_VELOCITY_RAW));
     velocityValueLabel->setObjectName("blueValueLabel");
     velocityValueLabel->setMinimumWidth(140);
+
+    velocityTorqueLimitValueLabel = new QLabel(QString("%1 raw").arg(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW));
+    velocityTorqueLimitValueLabel->setObjectName("blueValueLabel");
+    velocityTorqueLimitValueLabel->setMinimumWidth(140);
 
     layout->addWidget(new QLabel("Min:"), 0, 0);
     layout->addWidget(velocityMinSpin, 0, 1);
@@ -255,6 +270,12 @@ QWidget *MainWindow::createVelocityGroup()
     layout->addWidget(velocitySlider, 1, 0, 1, 6);
     layout->addWidget(new QLabel("Value:"), 1, 6);
     layout->addWidget(velocityValueLabel, 1, 7);
+
+    layout->addWidget(new QLabel("Velocity Torque Limit:"), 2, 0);
+    layout->addWidget(velocityTorqueLimitSpin, 2, 1);
+    layout->addWidget(new QLabel("Limit:"), 2, 2);
+    layout->addWidget(velocityTorqueLimitValueLabel, 2, 3);
+    layout->addWidget(applyVelocityTorqueLimitButton, 2, 5, 1, 3);
 
     layout->setColumnStretch(4, 1);
     return group;
@@ -343,6 +364,8 @@ void MainWindow::setupWorkerThread()
             worker, &MotorWorker::readStatus, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyTorque,
             worker, &MotorWorker::applyTorque, Qt::QueuedConnection);
+    connect(this, &MainWindow::workerApplyVelocityTorqueLimit,
+            worker, &MotorWorker::applyVelocityTorqueLimitRaw, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyVelocityRaw,
             worker, &MotorWorker::applyVelocityRaw, Qt::QueuedConnection);
     connect(this, &MainWindow::workerEmergencyStop,
@@ -383,6 +406,12 @@ void MainWindow::setupConnections()
     connect(velocityDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityDirectValueChanged);
     connect(velocityDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onVelocityDirectEditingFinished);
     connect(applyVelocityButton, &QPushButton::clicked, this, &MainWindow::onApplyVelocityClicked);
+    connect(velocityTorqueLimitSpin, qOverload<int>(&QSpinBox::valueChanged),
+            this, &MainWindow::onVelocityTorqueLimitValueChanged);
+    connect(velocityTorqueLimitSpin, &QSpinBox::editingFinished,
+            this, &MainWindow::onVelocityTorqueLimitEditingFinished);
+    connect(applyVelocityTorqueLimitButton, &QPushButton::clicked,
+            this, &MainWindow::onApplyVelocityTorqueLimitClicked);
     connect(velocityMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
     connect(velocityMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
 
@@ -468,7 +497,13 @@ void MainWindow::onWorkerConnected(bool ok, quint32 chipId, const QString &messa
         return;
     }
 
-    chipIdValueLabel->setText(QString("0x%1").arg(chipId, 8, 16, QLatin1Char('0')).toUpper());
+    QString chipIdHex = QString("%1")
+                            .arg(chipId, 8, 16, QLatin1Char('0'))
+                            .toUpper();
+
+    chipIdValueLabel->setText("0x" + chipIdHex);
+
+    // chipIdValueLabel->setText(QString("0x%1").arg(chipId, 8, 16, QLatin1Char('0')).toUpper());
     setConnectedUi(true);
     appendLog(message);
     statusTimer.start(STATUS_TIMER_MS);
@@ -557,6 +592,29 @@ void MainWindow::onApplyVelocityClicked()
     scheduleVelocityCommand(velocityDirectSpin->value());
 }
 
+
+void MainWindow::onVelocityTorqueLimitValueChanged(int value)
+{
+    pendingVelocityTorqueLimitRaw = qBound(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
+                                           value,
+                                           DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
+
+    if (velocityTorqueLimitValueLabel != nullptr)
+    {
+        velocityTorqueLimitValueLabel->setText(QString("%1 raw").arg(pendingVelocityTorqueLimitRaw));
+    }
+}
+
+void MainWindow::onVelocityTorqueLimitEditingFinished()
+{
+    applyVelocityTorqueLimitNow();
+}
+
+void MainWindow::onApplyVelocityTorqueLimitClicked()
+{
+    applyVelocityTorqueLimitNow();
+}
+
 void MainWindow::onVelocityRangeChanged()
 {
     updateRange(velocityMinSpin, velocityMaxSpin, velocitySlider, velocityDirectSpin, velocityValueLabel, QStringLiteral(" raw"));
@@ -637,10 +695,32 @@ void MainWindow::sendPendingVelocityCommand()
     statusTimer.stop();
     statusRequestPending = false;
 
-    logAction(QString("Velocity target raw=%1")
-                  .arg(rawVelocity));
+    const int torqueLimitRaw = qBound(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
+                                      pendingVelocityTorqueLimitRaw,
+                                      DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
 
+    logAction(QString("Velocity target raw=%1 with torque limit raw=%2")
+                  .arg(rawVelocity)
+                  .arg(torqueLimitRaw));
+
+    emit workerApplyVelocityTorqueLimit(torqueLimitRaw);
     emit workerApplyVelocityRaw(rawVelocity);
+}
+
+
+void MainWindow::applyVelocityTorqueLimitNow()
+{
+    if (!connectedToController)
+    {
+        return;
+    }
+
+    const int torqueLimitRaw = qBound(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
+                                      pendingVelocityTorqueLimitRaw,
+                                      DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
+
+    logAction(QString("Velocity torque limit raw=%1").arg(torqueLimitRaw));
+    emit workerApplyVelocityTorqueLimit(torqueLimitRaw);
 }
 
 void MainWindow::updateChipStatus()
@@ -670,10 +750,17 @@ void MainWindow::onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runSta
     setFeedbackValue("flux_raw", QString::number(runStatus.fluxActualRaw));
     setFeedbackValue("torque_raw", QString::number(runStatus.torqueActualRaw));
     setFeedbackValue("position_actual", QString::number(runStatus.positionActual));
-    setFeedbackValue("torque_flux_actual",
-                     QString("0x%1")
-                         .arg(runStatus.torqueFluxActual, 8, 16, QLatin1Char('0'))
-                         .toUpper());
+
+    QString torqueFluxActual = "0x";
+    setFeedbackValue("torque_flux_actual",torqueFluxActual+QString("%1")
+                            .arg(runStatus.torqueFluxActual, 8, 16, QLatin1Char('0'))
+                            .toUpper());
+
+    chipIdValueLabel->setText("0x" + torqueFluxActual);
+    // setFeedbackValue("torque_flux_actual",
+    //                  QString("0x%1")
+    //                      .arg(runStatus.torqueFluxActual, 8, 16, QLatin1Char('0'))
+    //                      .toUpper());
 
     setFeedbackValue("velocity_calc",
                      QString("%1 raw")
@@ -818,6 +905,7 @@ void MainWindow::setConnectedUi(bool connected)
     connectButton->setEnabled(true);
     applyTorqueButton->setEnabled(connected);
     applyVelocityButton->setEnabled(connected);
+    applyVelocityTorqueLimitButton->setEnabled(connected);
     estopButton->setEnabled(connected);
 
     if (connected)

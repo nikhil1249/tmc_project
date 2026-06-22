@@ -31,6 +31,7 @@ signals:
     void workerConnectAndInitialize(const QString &portName, int baudRate);
     void workerReadStatus();
     void workerApplyTorque(int value);
+    void workerApplyVelocityTorqueLimit(int torqueLimitRaw);
     void workerApplyVelocityRaw(qint32 rawVelocity);
     void workerEmergencyStop();
     void workerShutdown();
@@ -50,6 +51,9 @@ private slots:
     void onVelocityDirectValueChanged(int value);
     void onVelocityDirectEditingFinished();
     void onApplyVelocityClicked();
+    void onVelocityTorqueLimitValueChanged(int value);
+    void onVelocityTorqueLimitEditingFinished();
+    void onApplyVelocityTorqueLimitClicked();
     void onVelocityRangeChanged();
 
     void onEstopClicked();
@@ -78,6 +82,11 @@ private:
     static constexpr int DEFAULT_VELOCITY_RAW = 4000000;
     static constexpr int DEFAULT_TORQUEMIN_VALUE = -3000;
     static constexpr int DEFAULT_TORQUEMAX_VALUE = 3000;
+    // This is the torque/current limit used while running in velocity mode.
+    // It is not a torque-mode target. Change this default as needed for testing.
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MIN = 0;
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MAX = 3000;
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 3000;
 
     QThread workerThread;
     MotorWorker *worker = nullptr;
@@ -102,7 +111,10 @@ private:
     QSlider *velocitySlider = nullptr;
     QSpinBox *velocityDirectSpin = nullptr;
     QPushButton *applyVelocityButton = nullptr;
+    QSpinBox *velocityTorqueLimitSpin = nullptr;
+    QPushButton *applyVelocityTorqueLimitButton = nullptr;
     QLabel *velocityValueLabel = nullptr;
+    QLabel *velocityTorqueLimitValueLabel = nullptr;
 
     QHash<QString, QLabel *> feedbackLabels;
 
@@ -115,6 +127,7 @@ private:
     QTimer velocityCommandTimer;
 
     int pendingTorque = 0;
+    int pendingVelocityTorqueLimitRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
     qint32 pendingVelocityRaw = 0;
     bool syncingUi = false;
     bool connectedToController = false;
@@ -142,6 +155,7 @@ private:
 
     void scheduleTorqueCommand(int value);
     void scheduleVelocityCommand(qint32 rawVelocity);
+    void applyVelocityTorqueLimitNow();
     void updateRange(QSpinBox *minSpin, QSpinBox *maxSpin, QSlider *slider, QSpinBox *directSpin, QLabel *valueLabel, const QString &suffix = QString());
     void setConnectedUi(bool connected);
     void setStatusText(const QString &text, bool ok);

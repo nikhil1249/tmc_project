@@ -61,6 +61,7 @@ public:
 
     bool setVelocityTarget(qint32 targetVelocity);
     bool setTorqueTarget(qint32 targetTorque);
+    bool setVelocityTorqueLimit(qint32 torqueLimitRaw);
     bool prepareVelocityModeForRun();
     bool prepareTorqueModeForRun();
     bool emergencyStop();
@@ -144,6 +145,9 @@ private:
     static constexpr qint32 PYTHON_CONST_VELOCITY_RAW = 4000000;
     static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW  = 4000000;
     static constexpr qint32 MAX_ALLOWED_TORQUE_RAW    = 3000;
+    static constexpr qint32 MIN_VELOCITY_TORQUE_LIMIT_RAW = 0;
+    static constexpr qint32 MAX_VELOCITY_TORQUE_LIMIT_RAW = 3000;
+    static constexpr qint16 DEFAULT_FLUX_LIMIT_RAW = 3000;
 
     // GUI current conversion. TMC6460 FOC torque actual is a signed raw current-axis value.
     // Keep this as a project calibration constant because the exact mA/raw depends on
@@ -180,6 +184,7 @@ private:
     bool applyVelocityWithSafeReverseRamp(qint32 targetVelocity);
     static int signOf(qint32 value);
     static quint32 makeTorqueFluxTarget(qint16 torqueRaw, qint16 fluxRaw = 0);
+    static quint32 makeTorqueFluxLimit(qint16 torqueLimitRaw, qint16 fluxLimitRaw);
 
     static QString hex8(quint8 value);
     static QString hex16(quint16 value);

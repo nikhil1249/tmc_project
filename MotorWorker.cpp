@@ -85,12 +85,12 @@ void MotorWorker::readStatus()
         emit errorChanged(QString());
         emit statusReady(status);
 
-        emit logMessage(QStringLiteral("MONITOR: velRaw=%1 pos=%2 torqueFlux=%3 torqueRaw=%4 status=%5")
-                        .arg(status.velocityActualRaw)
-                        .arg(status.positionActual)
-                        .arg(hex32(status.torqueFluxActual))
-                        .arg(status.torqueActualRaw)
-                        .arg(hex32(status.chipStatusFlags)));
+        // emit logMessage(QStringLiteral("MONITOR: velRaw=%1 pos=%2 torqueFlux=%3 torqueRaw=%4 status=%5")
+        //                 .arg(status.velocityActualRaw)
+        //                 .arg(status.positionActual)
+        //                 .arg(hex32(status.torqueFluxActual))
+        //                 .arg(status.torqueActualRaw)
+        //                 .arg(hex32(status.chipStatusFlags)));
 
 #if TMC6460_ENABLE_SIMPLE_STALL_DETECTION
         checkSimpleStall(status);
@@ -120,6 +120,37 @@ void MotorWorker::applyTorque(int value)
 
     const bool ok = tmc->isOpen() && tmc->setTorqueTarget(limitedTorque);
     emit commandDone(QStringLiteral("Torque target %1").arg(limitedTorque), ok);
+}
+
+
+void MotorWorker::applyVelocityTorqueLimitRaw(int torqueLimitRaw)
+{
+    ensureInterface();
+
+    const int limitedTorqueLimit = qBound<int>(0, torqueLimitRaw, MAX_ALLOWED_TORQUE_RAW);
+
+    if (limitedTorqueLimit != torqueLimitRaw)
+    {
+        emit logMessage(QStringLiteral("SAFETY: Velocity torque limit %1 clipped to %2")
+                        .arg(torqueLimitRaw)
+                        .arg(limitedTorqueLimit));
+    }
+
+    if (!tmc->isOpen())
+    {
+        emit commandDone(QStringLiteral("Velocity torque limit %1").arg(limitedTorqueLimit), false);
+        emit errorChanged(QStringLiteral("Cannot apply velocity torque limit: serial port is not open"));
+        return;
+    }
+
+    const bool ok = tmc->setVelocityTorqueLimit(limitedTorqueLimit);
+
+    emit commandDone(QStringLiteral("Velocity torque limit %1").arg(limitedTorqueLimit), ok);
+
+    if (!ok)
+    {
+        emit errorChanged(QStringLiteral("Velocity torque limit write failed"));
+    }
 }
 
 void MotorWorker::applyVelocityRaw(qint32 rawVelocity)
@@ -289,9 +320,9 @@ void MotorWorker::startStallMonitor(qint32 rawVelocity)
     stallTargetVelocityRaw = rawVelocity;
     stallTimer.restart();
 
-    emit stallStateChanged(false,
-                           QStringLiteral("Monitoring, target raw=%1, stall threshold 60% after 5 s")
-                               .arg(rawVelocity));
+    emit stallStateChanged(false,"Monitor");
+                           // QStringLiteral("Monitoring, target raw=%1, stall threshold 60% after 5 s")
+                           //     .arg(rawVelocity));
     emit logMessage(QStringLiteral("STALL_MONITOR: started targetRaw=%1 minRaw=%2")
                     .arg(stallTargetVelocityRaw)
                     .arg(qRound(qAbs(static_cast<double>(stallTargetVelocityRaw)) * STALL_MIN_VELOCITY_RATIO)));

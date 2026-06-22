@@ -206,9 +206,9 @@ bool Tmc6460QtInterface::readRunStatus(RunStatus *status)
 
         // Temporary debug print requested for tuning. Status polling is 1 second,
         // so this prints PID velocity actual once per second.
-        qDebug().noquote() << QString("DEBUG PID_VELOCITY_ACTUAL [0x0154] = %1, raw=%2")
-                                  .arg(hex32(velocityActualReg))
-                                  .arg(result.velocityActualRaw);
+        // qDebug().noquote() << QString("DEBUG PID_VELOCITY_ACTUAL [0x0154] = %1, raw=%2")
+        //                           .arg(hex32(velocityActualReg))
+        //                           .arg(result.velocityActualRaw);
     }
     else
     {
@@ -472,8 +472,8 @@ void Tmc6460QtInterface::debugReadRunRegistersOnce()
     if (readRegister(REG_FOC_PID_VELOCITY_TARGET, &value))
         log(QString("DEBUG VELOCITY_TARGET [0x0150] = %1").arg(hex32(value)));
 
-    if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &value))
-        log(QString("DEBUG VELOCITY_ACTUAL [%1] = %2").arg(hex16(REG_FOC_PID_VELOCITY_ACTUAL)).arg(hex32(value)));
+    // if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &value))
+    //     log(QString("DEBUG VELOCITY_ACTUAL [%1] = %2").arg(hex16(REG_FOC_PID_VELOCITY_ACTUAL)).arg(hex32(value)));
 
     if (readRegister(REG_FOC_PID_POSITION_ACTUAL, &value))
         log(QString("DEBUG POSITION_ACTUAL [%1] = %2").arg(hex16(REG_FOC_PID_POSITION_ACTUAL)).arg(hex32(value)));
@@ -505,6 +505,42 @@ int Tmc6460QtInterface::signOf(qint32 value)
         return -1;
     }
     return 0;
+}
+
+
+quint32 Tmc6460QtInterface::makeTorqueFluxLimit(qint16 torqueLimitRaw, qint16 fluxLimitRaw)
+{
+    return (static_cast<quint32>(static_cast<quint16>(torqueLimitRaw)) << 16) |
+           static_cast<quint16>(fluxLimitRaw);
+}
+
+bool Tmc6460QtInterface::setVelocityTorqueLimit(qint32 torqueLimitRaw)
+{
+    setBusy(true);
+
+    const qint16 limitedTorque = static_cast<qint16>(qBound<qint32>(MIN_VELOCITY_TORQUE_LIMIT_RAW,
+                                                                    torqueLimitRaw,
+                                                                    MAX_VELOCITY_TORQUE_LIMIT_RAW));
+
+    const quint32 limitRegisterValue = makeTorqueFluxLimit(limitedTorque, DEFAULT_FLUX_LIMIT_RAW);
+
+    // Velocity mode torque adjustment: only update the torque/flux limits.
+    // Do not change motor mode and do not write FOC_PID_TORQUE_FLUX_TARGET.
+    const bool ok = writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_LIMITS,
+                                         limitRegisterValue,
+                                         "FOC_PID_TORQUE_FLUX_LIMITS VELOCITY_LIMIT",
+                                         false);
+
+    if (ok)
+    {
+        log(QString("ACTION: Velocity-mode torque limit=%1, flux limit=%2, register=%3")
+                .arg(limitedTorque)
+                .arg(DEFAULT_FLUX_LIMIT_RAW)
+                .arg(hex32(limitRegisterValue)));
+    }
+
+    setBusy(false);
+    return ok;
 }
 
 bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
