@@ -251,12 +251,14 @@ QWidget *MainWindow::createVelocityGroup()
     velocityMinSpin->setValue(minDisplay);
     velocityMinSpin->setSuffix(velocityUnitSuffix());
     velocityMinSpin->setMinimumWidth(140);
+    velocityMinSpin->setKeyboardTracking(false);
 
     velocityMaxSpin = new QSpinBox;
     velocityMaxSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
     velocityMaxSpin->setValue(maxDisplay);
     velocityMaxSpin->setSuffix(velocityUnitSuffix());
     velocityMaxSpin->setMinimumWidth(140);
+    velocityMaxSpin->setKeyboardTracking(false);
 
     velocityDirectSpin = new QSpinBox;
     velocityDirectSpin->setRange(minDisplay, maxDisplay);
@@ -268,6 +270,14 @@ QWidget *MainWindow::createVelocityGroup()
     applyVelocityButton = new QPushButton("Apply Velocity");
     applyVelocityButton->setMinimumWidth(140);
 
+    velocityCwButton = new QPushButton("CW");
+    velocityCwButton->setMinimumWidth(90);
+    velocityCwButton->setToolTip("Run clockwise using the magnitude entered in Direct Value.");
+
+    velocityCcwButton = new QPushButton("CCW");
+    velocityCcwButton->setMinimumWidth(90);
+    velocityCcwButton->setToolTip("Run anticlockwise using the magnitude entered in Direct Value.");
+
     velocityTorqueLimitSpin = new QSpinBox;
     velocityTorqueLimitSpin->setRange(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
                                       DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
@@ -276,8 +286,10 @@ QWidget *MainWindow::createVelocityGroup()
     velocityTorqueLimitSpin->setMinimumWidth(150);
     velocityTorqueLimitSpin->setKeyboardTracking(false);
 
-    applyVelocityTorqueLimitButton = new QPushButton("Apply Torque/Flux Limit");
-    applyVelocityTorqueLimitButton->setMinimumWidth(160);
+    applyVelocityTorqueLimitButton = new QPushButton("Apply T/F Limit");
+    applyVelocityTorqueLimitButton->setMinimumWidth(145);
+    applyVelocityTorqueLimitButton->setMaximumWidth(160);
+    applyVelocityTorqueLimitButton->setToolTip("Apply torque and flux limit");
 
     velocitySlider = new QSlider(Qt::Horizontal);
     velocitySlider->setRange(minDisplay, maxDisplay);
@@ -292,29 +304,86 @@ QWidget *MainWindow::createVelocityGroup()
 
     velocityTorqueLimitValueLabel = new QLabel(QString("%1 raw").arg(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW));
     velocityTorqueLimitValueLabel->setObjectName("blueValueLabel");
-    velocityTorqueLimitValueLabel->setMinimumWidth(140);
+    velocityTorqueLimitValueLabel->setMinimumWidth(120);
 
-    layout->addWidget(new QLabel("Unit:"), 0, 0);
-    layout->addWidget(new QLabel("RAW"), 0, 1);
-    layout->addWidget(new QLabel("Min:"), 0, 2);
-    layout->addWidget(velocityMinSpin, 0, 3);
-    layout->addWidget(new QLabel("Max:"), 0, 4);
-    layout->addWidget(velocityMaxSpin, 0, 5);
-    layout->addWidget(new QLabel("Direct Value:"), 0, 6);
-    layout->addWidget(velocityDirectSpin, 0, 7);
-    layout->addWidget(applyVelocityButton, 0, 8);
+    velocityTorqueLimitAppliedLabel = new QLabel(QString("%1 raw").arg(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW));
+    velocityTorqueLimitAppliedLabel->setObjectName("blueValueLabel");
+    velocityTorqueLimitAppliedLabel->setMinimumWidth(120);
 
+    /*
+     * Row 0:
+     * Min and Max at the left, large gap, then Direct Value and Apply Velocity.
+     */
+    QHBoxLayout *velocityTopRow = new QHBoxLayout;
+    velocityTopRow->setContentsMargins(0, 0, 0, 0);
+    velocityTopRow->setSpacing(8);
+
+    velocityTopRow->addWidget(new QLabel("Min:"));
+    velocityTopRow->addWidget(velocityMinSpin);
+
+    velocityTopRow->addSpacing(16);     // small gap between Min and Max
+
+    velocityTopRow->addWidget(new QLabel("Max:"));
+    velocityTopRow->addWidget(velocityMaxSpin);
+
+    velocityTopRow->addStretch(1);      // big gap before Direct Value
+
+    velocityTopRow->addWidget(new QLabel("Direct Value:"));
+    velocityTopRow->addWidget(velocityDirectSpin);
+    velocityTopRow->addWidget(applyVelocityButton);
+
+    layout->addLayout(velocityTopRow, 0, 0, 1, 11);
+    /*
+     * Row 1:
+     * Slider with live displayed velocity value.
+     */
     layout->addWidget(velocitySlider, 1, 0, 1, 7);
     layout->addWidget(new QLabel("Value:"), 1, 7);
-    layout->addWidget(velocityValueLabel, 1, 8, 1, 2);
+    layout->addWidget(velocityValueLabel, 1, 8);
 
+    /*
+     * Row 2:
+     * Limit input and edited value near each other.
+     * Gap.
+     * Apply button and applied value near each other.
+     * Big gap.
+     * CW and CCW at the right.
+     */
     layout->addWidget(new QLabel("Velocity Torque/Flux Limit:"), 2, 0);
     layout->addWidget(velocityTorqueLimitSpin, 2, 1);
-    layout->addWidget(new QLabel("Limit:"), 2, 2);
-    layout->addWidget(velocityTorqueLimitValueLabel, 2, 3);
-    layout->addWidget(applyVelocityTorqueLimitButton, 2, 5, 1, 3);
 
-    layout->setColumnStretch(6, 1);
+    layout->addWidget(applyVelocityTorqueLimitButton, 2, 2);
+
+    QHBoxLayout *directionButtonLayout = new QHBoxLayout;
+    directionButtonLayout->setContentsMargins(0, 0, 0, 0);
+    directionButtonLayout->setSpacing(12);
+
+    velocityCwButton->setMinimumWidth(120);
+    velocityCwButton->setMaximumWidth(120);
+
+    velocityCcwButton->setMinimumWidth(120);
+    velocityCcwButton->setMaximumWidth(120);
+
+    directionButtonLayout->addStretch(1);
+    directionButtonLayout->addWidget(velocityCwButton);
+    directionButtonLayout->addWidget(velocityCcwButton);
+
+    layout->addLayout(directionButtonLayout, 2, 6, 1, 5);
+
+    layout->setColumnStretch(0, 0);   // Min label
+    layout->setColumnStretch(1, 0);   // Min spin
+    layout->setColumnStretch(2, 0);   // Max label
+    layout->setColumnStretch(3, 0);   // Max spin
+
+    layout->setColumnStretch(4, 4);   // large gap after Min/Max
+    layout->setColumnStretch(5, 0);
+
+    layout->setColumnStretch(6, 0);   // Direct Value label
+    layout->setColumnStretch(7, 0);   // Direct Value spin
+    layout->setColumnStretch(8, 0);   // Apply Velocity
+
+    layout->setColumnStretch(9, 3);   // gap before CW/CCW if used
+    layout->setColumnStretch(10, 0);
     return group;
 }
 
@@ -331,7 +400,7 @@ QWidget *MainWindow::createLiveFeedbackPanel()
     addFeedbackItem(layout, "flux_raw", "Flux raw:", 0, 1);
     addFeedbackItem(layout, "velocity_calc", "Velocity actual:", 0, 2);
     addFeedbackItem(layout, "torque_raw", "Torque raw:", 0, 3);
-    addFeedbackItem(layout, "stall_status", "Stall:", 1, 0, "Not active");
+    // addFeedbackItem(layout, "stall_status", "Stall:", 1, 0, "Not active");
 
     for (int i = 0; i < 8; ++i)
     {
@@ -443,6 +512,8 @@ void MainWindow::setupConnections()
     connect(velocityDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityDirectValueChanged);
     connect(velocityDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onVelocityDirectEditingFinished);
     connect(applyVelocityButton, &QPushButton::clicked, this, &MainWindow::onApplyVelocityClicked);
+    connect(velocityCwButton, &QPushButton::clicked, this, &MainWindow::onVelocityCwClicked);
+    connect(velocityCcwButton, &QPushButton::clicked, this, &MainWindow::onVelocityCcwClicked);
     connect(velocityTorqueLimitSpin, qOverload<int>(&QSpinBox::valueChanged),
             this, &MainWindow::onVelocityTorqueLimitValueChanged);
     connect(velocityTorqueLimitSpin, &QSpinBox::editingFinished,
@@ -628,6 +699,16 @@ void MainWindow::onApplyVelocityClicked()
     scheduleVelocityCommand(velocityDirectSpin->value());
 }
 
+void MainWindow::onVelocityCwClicked()
+{
+    applyVelocityFromDirectWithDirection(+1);
+}
+
+void MainWindow::onVelocityCcwClicked()
+{
+    applyVelocityFromDirectWithDirection(-1);
+}
+
 void MainWindow::onVelocityTorqueLimitValueChanged(int value)
 {
     pendingVelocityTorqueLimitRaw = qBound(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
@@ -785,6 +866,36 @@ void MainWindow::sendPendingVelocityCommand()
     emit workerApplyVelocityRaw(rawVelocity);
 }
 
+void MainWindow::applyVelocityFromDirectWithDirection(int directionSign)
+{
+    if (!connectedToController)
+    {
+        return;
+    }
+
+    const int magnitude = qAbs(velocityDirectSpin->value());
+    const int requestedVelocity = (directionSign >= 0) ? magnitude : -magnitude;
+    const int minValue = velocityMinSpin->value();
+    const int maxValue = velocityMaxSpin->value();
+    const int boundedVelocity = qBound(minValue, requestedVelocity, maxValue);
+
+    syncingUi = true;
+    {
+        QSignalBlocker b1(velocityDirectSpin);
+        QSignalBlocker b2(velocitySlider);
+        velocityDirectSpin->setValue(boundedVelocity);
+        velocitySlider->setValue(boundedVelocity);
+        velocityValueLabel->setText(QString("%1 %2").arg(boundedVelocity).arg(velocityUnitText()));
+    }
+    syncingUi = false;
+
+    logAction(QString("Velocity %1 button clicked, direct magnitude=%2, applying target=%3")
+              .arg(directionSign >= 0 ? "CW" : "CCW")
+              .arg(magnitude)
+              .arg(boundedVelocity));
+
+    scheduleVelocityCommand(boundedVelocity);
+}
 
 void MainWindow::applyVelocityTorqueLimitNow()
 {
@@ -842,6 +953,17 @@ void MainWindow::onWorkerCommandDone(const QString &action, bool ok)
     if (ok)
     {
         clearError();
+
+        if (action.startsWith(QStringLiteral("Velocity torque/flux limit")))
+        {
+            const int appliedLimitRaw = qBound(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
+                                               pendingVelocityTorqueLimitRaw,
+                                               DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
+            if (velocityTorqueLimitAppliedLabel != nullptr)
+            {
+                velocityTorqueLimitAppliedLabel->setText(QString("%1 raw").arg(appliedLimitRaw));
+            }
+        }
     }
     else
     {
@@ -1010,6 +1132,8 @@ void MainWindow::setConnectedUi(bool connected)
     connectButton->setEnabled(true);
     applyTorqueButton->setEnabled(connected);
     applyVelocityButton->setEnabled(connected);
+    velocityCwButton->setEnabled(connected);
+    velocityCcwButton->setEnabled(connected);
     applyVelocityTorqueLimitButton->setEnabled(connected);
     estopButton->setEnabled(connected);
 

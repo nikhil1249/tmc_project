@@ -55,6 +55,8 @@ private slots:
     void onVelocityDirectValueChanged(int value);
     void onVelocityDirectEditingFinished();
     void onApplyVelocityClicked();
+    void onVelocityCwClicked();
+    void onVelocityCcwClicked();
     void onVelocityTorqueLimitValueChanged(int value);
     void onVelocityTorqueLimitEditingFinished();
     void onApplyVelocityTorqueLimitClicked();
@@ -78,17 +80,17 @@ private:
     static constexpr int DEFAULT_BAUD_RATE = 115200;
     static constexpr int STATUS_TIMER_MS = 1000;
     static constexpr int COMMAND_DEBOUNCE_MS = 100;
-    static constexpr int MIN_ALLOWED_VALUE = -10000000;
-    static constexpr int MAX_ALLOWED_VALUE =  10000000;
+    static constexpr int MIN_ALLOWED_VALUE = -9600000;
+    static constexpr int MAX_ALLOWED_VALUE =  9600000;
     static constexpr int DEFAULT_VELMIN_RAW = -4000000;
     static constexpr int DEFAULT_VELMAX_RAW = 4000000;
     static constexpr int DEFAULT_VELOCITY_RAW = 4000000;
-    static constexpr int DEFAULT_TORQUEMIN_VALUE = -3000;
-    static constexpr int DEFAULT_TORQUEMAX_VALUE = 3000;
+    static constexpr int DEFAULT_TORQUEMIN_VALUE = -10000;
+    static constexpr int DEFAULT_TORQUEMAX_VALUE = 10000;
     // This is the torque/current limit used while running in velocity mode.
     // It is not a torque-mode target. Change this default as needed for testing.
     static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MIN = 0;
-    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MAX = 10000;
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MAX = 5000;
     static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 1000;
 
     QThread workerThread;
@@ -115,10 +117,13 @@ private:
     QSlider *velocitySlider = nullptr;
     QSpinBox *velocityDirectSpin = nullptr;
     QPushButton *applyVelocityButton = nullptr;
+    QPushButton *velocityCwButton = nullptr;
+    QPushButton *velocityCcwButton = nullptr;
     QSpinBox *velocityTorqueLimitSpin = nullptr;
     QPushButton *applyVelocityTorqueLimitButton = nullptr;
     QLabel *velocityValueLabel = nullptr;
     QLabel *velocityTorqueLimitValueLabel = nullptr;
+    QLabel *velocityTorqueLimitAppliedLabel = nullptr;
 
     QHash<QString, QLabel *> feedbackLabels;
 
@@ -161,6 +166,7 @@ private:
 
     void scheduleTorqueCommand(int value);
     void scheduleVelocityCommand(int displayVelocity);
+    void applyVelocityFromDirectWithDirection(int directionSign);
     void applyVelocityTorqueLimitNow();
     int rawToVelocityDisplay(qint32 rawVelocity) const;
     qint32 velocityDisplayToRaw(int displayVelocity) const;

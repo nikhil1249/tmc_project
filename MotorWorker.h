@@ -58,8 +58,8 @@ private:
     // Raw velocity ramp. Python test uses 4,000,000 raw; this ramps in raw units.
     static constexpr int VELOCITY_RAMP_TIMER_MS = 50;
     static constexpr qint32 VELOCITY_RAMP_STEP_RAW = 100000;
-    static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW = 10000000;
-    static constexpr qint32 MAX_ALLOWED_TORQUE_RAW = 10000;
+    static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW = 9600000UL;
+    static constexpr qint32 MAX_ALLOWED_TORQUE_RAW = 5000;
 
     // Python test.py uses a 5 s settle time and 60% velocity threshold.
     static constexpr int STALL_SETTLE_TIME_MS = 1000;
