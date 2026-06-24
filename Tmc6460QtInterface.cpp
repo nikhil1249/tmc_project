@@ -235,11 +235,27 @@ bool Tmc6460QtInterface::setVelocityTarget(qint32 targetVelocity)
                                     targetVelocity,
                                     MAX_ALLOWED_VELOCITY_RAW);
 
-    // The worker already performs optional raw velocity ramping. This function must only prepare
-    // velocity mode once, then write the target register. Re-writing MOTOR_MOTION
-    // and checking DRV events at every ramp step creates unnecessary UART traffic.
-    const bool ok = prepareVelocityModeForRun() &&
-                    writeVelocityTargetImmediate(targetVelocity, "FOC_PID_VELOCITY_TARGET");
+    bool ok = false;
+
+    // Important: velocity 0 must not remain in velocity loop.
+    // On this actuator it can decay slowly and then vibrate. Use the same
+    // Python/TMCL idle sequence that was stable during testing.
+    if (targetVelocity == 0)
+    {
+        ok = applyIdleStopSequence("VELOCITY_ZERO_STOP");
+        log("ACTION: Velocity target raw=0 applied using idle stop sequence");
+        setBusy(false);
+        return ok;
+    }
+
+    // Always refresh velocity limit before a non-zero command.
+    // This value follows the GUI Min/Max velocity range through setVelocityLimitRaw().
+    ok = writeRegisterChecked(REG_FOC_PID_VELOCITY_LIMIT,
+                              static_cast<quint32>(currentVelocityLimitRaw),
+                              "FOC_PID_VELOCITY_LIMIT RUN",
+                              false) &&
+         prepareVelocityModeForRun() &&
+         writeVelocityTargetImmediate(targetVelocity, "FOC_PID_VELOCITY_TARGET");
 
     if (ok)
     {
@@ -409,7 +425,6 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
                 }
 
                 QThread::msleep(SAFE_REVERSE_RAMP_DELAY_MS);
-                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
             }
             return true;
         }
@@ -433,7 +448,6 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
         }
 
         QThread::msleep(SAFE_REVERSE_RAMP_DELAY_MS);
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
     }
 
     // Step 2: let the mechanical system unload briefly at zero speed.
@@ -453,7 +467,6 @@ bool Tmc6460QtInterface::applyVelocityWithSafeReverseRamp(qint32 targetVelocity)
         }
 
         QThread::msleep(SAFE_REVERSE_RAMP_DELAY_MS);
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
     }
 
     return true;
@@ -514,6 +527,31 @@ quint32 Tmc6460QtInterface::makeTorqueFluxLimit(qint16 torqueLimitRaw, qint16 fl
            static_cast<quint16>(fluxLimitRaw);
 }
 
+
+bool Tmc6460QtInterface::setVelocityLimitRaw(qint32 limitRaw)
+{
+    setBusy(true);
+
+    qint32 requestedLimit = qAbs(limitRaw);
+    requestedLimit = qBound<qint32>(1, requestedLimit, MAX_ALLOWED_VELOCITY_RAW);
+
+    const bool ok = writeRegisterChecked(REG_FOC_PID_VELOCITY_LIMIT,
+                                         static_cast<quint32>(requestedLimit),
+                                         "FOC_PID_VELOCITY_LIMIT GUI_RANGE",
+                                         false);
+
+    if (ok)
+    {
+        currentVelocityLimitRaw = requestedLimit;
+        log(QString("ACTION: Velocity limit register updated raw=%1, register=%2")
+                .arg(currentVelocityLimitRaw)
+                .arg(hex32(static_cast<quint32>(currentVelocityLimitRaw))));
+    }
+
+    setBusy(false);
+    return ok;
+}
+
 bool Tmc6460QtInterface::setVelocityTorqueLimit(qint32 torqueLimitRaw)
 {
     setBusy(true);
@@ -522,7 +560,7 @@ bool Tmc6460QtInterface::setVelocityTorqueLimit(qint32 torqueLimitRaw)
                                                                     torqueLimitRaw,
                                                                     MAX_VELOCITY_TORQUE_LIMIT_RAW));
 
-    const quint32 limitRegisterValue = makeTorqueFluxLimit(limitedTorque, DEFAULT_FLUX_LIMIT_RAW);
+    const quint32 limitRegisterValue = makeTorqueFluxLimit(limitedTorque, limitedTorque);
 
     // Velocity mode torque adjustment: only update the torque/flux limits.
     // Do not change motor mode and do not write FOC_PID_TORQUE_FLUX_TARGET.
@@ -535,7 +573,7 @@ bool Tmc6460QtInterface::setVelocityTorqueLimit(qint32 torqueLimitRaw)
     {
         log(QString("ACTION: Velocity-mode torque limit=%1, flux limit=%2, register=%3")
                 .arg(limitedTorque)
-                .arg(DEFAULT_FLUX_LIMIT_RAW)
+                .arg(limitedTorque)
                 .arg(hex32(limitRegisterValue)));
     }
 
@@ -574,38 +612,59 @@ bool Tmc6460QtInterface::holdAfterStall()
 {
     setBusy(true);
 
-    /*
-     * Python test.py detects stall by watching PID_VELOCITY_ACTUAL drop below
-     * 60% of the commanded velocity after a 5 s settle time, then stops the
-     * controller. For GUI testing we keep the driver enabled and force zero
-     * velocity target so FOC actively resists further motion at the blocked point.
-     */
+    const bool ok = applyIdleStopSequence("STALL_STOP");
+
+    setBusy(false);
+    return ok;
+}
+
+bool Tmc6460QtInterface::applyIdleStopSequence(const char *reason)
+{
     bool ok = true;
 
+    // Keep gate driver enabled for a controlled stop unless it was already off.
     if (!driverEnabled)
     {
         ok &= setDriverEnable(true);
+        QThread::msleep(30);
     }
 
-    ok &= writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
-                               MOTOR_MOTION_VELOCITY_VALUE,
-                               "MCC_CONFIG_MOTOR_MOTION VELOCITY HOLD",
+    // 1) Remove velocity demand first.
+    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
+                               0x00000000UL,
+                               "FOC_PID_VELOCITY_TARGET ZERO_STOP",
                                false);
 
-    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
-                               0,
-                               "FOC_PID_VELOCITY_TARGET STALL HOLD",
+    // 2) Switch to torque mode.
+    ok &= writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
+                               MOTOR_MOTION_TORQUE_VALUE,
+                               "MCC_CONFIG_MOTOR_MOTION TORQUE_STOP",
                                false);
+
+    // 3) Set torque and flux target to zero.
+    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
+                               0x00000000UL,
+                               "FOC_PID_TORQUE_FLUX_TARGET ZERO_STOP",
+                               false);
+
+    QThread::msleep(500);
+
+    // 4) Put controller into the known Python/TMCL idle/PWM_ON state.
+    ok &= writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
+                               MOTOR_MOTION_IDLE_VALUE,
+                               "MCC_CONFIG_MOTOR_MOTION PWM_ON_IDLE_STOP",
+                               false);
+
+    QThread::msleep(500);
 
     lastVelocityCommand = 0;
-    velocityModePrepared = true;
+    velocityModePrepared = false;
     torqueModePrepared = false;
     estopActive = false;
 
-    log(QString("STALL: hold sequence applied. Velocity target=0, mode=%1")
-            .arg(hex32(MOTOR_MOTION_VELOCITY_VALUE)));
+    log(QString("STOP: %1 sequence applied: VELOCITY_TARGET=0, TORQUE : TORQUE_FLUX_TARGET=0, PWM_ON/IDLE")
+            .arg(QString::fromLatin1(reason)));
 
-    setBusy(false);
     return ok;
 }
 
@@ -781,7 +840,6 @@ bool Tmc6460QtInterface::readExact(QByteArray *data, int length, int timeoutMs)
             data->append(serialPort.read(length - data->size()));
         }
 
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
     }
 
     return true;
@@ -921,7 +979,6 @@ void Tmc6460QtInterface::quickCheckDriverEvent()
             }
         }
         QThread::msleep(2);
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
     }
 
     log("WARNING: DRV ready event not seen in fast check. Continuing immediately.");
@@ -942,7 +999,6 @@ bool Tmc6460QtInterface::waitForChipEvent(quint32 eventMask, int timeoutMs)
         }
 
         QThread::msleep(2);
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
     }
 
     return false;
@@ -999,7 +1055,7 @@ QVector<Tmc6460QtInterface::RegisterValue> Tmc6460QtInterface::configurationTabl
         {REG_FEEDBACK_VELOCITY_PER_CONF,   0xFFF00001UL, "FEEDBACK_VELOCITY_PER_CONF"},
         {REG_FEEDBACK_VELOCITY_PER_FILTER, 0x00000003UL, "FEEDBACK_VELOCITY_PER_FILTER"},
         {REG_FEEDBACK_OUTPUT_CONF,         0x00400001UL, "FEEDBACK_OUTPUT_CONF"},
-        {REG_FOC_PID_VELOCITY_LIMIT,       0x003D0900UL, "FOC_PID_VELOCITY_LIMIT"},
+        {REG_FOC_PID_VELOCITY_LIMIT,       0x00989680UL, "FOC_PID_VELOCITY_LIMIT"},
         {REG_FOC_PID_TORQUE_FLUX_TARGET,   0x00000000UL, "FOC_PID_TORQUE_FLUX_TARGET"},
         {REG_FOC_PID_VELOCITY_TARGET,      0x00000000UL, "FOC_PID_VELOCITY_TARGET"},
         {REG_HALL_MAP_CONFIG,              0x00000001UL, "HALL_MAP_CONFIG"}

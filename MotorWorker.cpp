@@ -78,7 +78,7 @@ void MotorWorker::readStatus()
 {
     ensureInterface();
 
-    if (!tmc->isOpen())
+    if (!tmc->isOpen() || tmc->isBusy())
     {
         return;
     }
@@ -126,6 +126,37 @@ void MotorWorker::applyTorque(int value)
     emit commandDone(QStringLiteral("Torque target %1").arg(limitedTorque), ok);
 }
 
+
+
+void MotorWorker::applyVelocityLimitRaw(qint32 limitRaw)
+{
+    ensureInterface();
+
+    const qint32 absLimit = qAbs(limitRaw);
+    const qint32 limitedVelocityLimit = qBound<qint32>(1, absLimit, MAX_ALLOWED_VELOCITY_RAW);
+
+    if (limitedVelocityLimit != absLimit)
+    {
+        emit logMessage(QStringLiteral("SAFETY: Velocity limit %1 clipped to %2")
+                        .arg(absLimit)
+                        .arg(limitedVelocityLimit));
+    }
+
+    if (!tmc->isOpen())
+    {
+        emit commandDone(QStringLiteral("Velocity limit raw=%1").arg(limitedVelocityLimit), false);
+        emit errorChanged(QStringLiteral("Cannot apply velocity limit: serial port is not open"));
+        return;
+    }
+
+    const bool ok = tmc->setVelocityLimitRaw(limitedVelocityLimit);
+    emit commandDone(QStringLiteral("Velocity limit raw=%1").arg(limitedVelocityLimit), ok);
+
+    if (!ok)
+    {
+        emit errorChanged(QStringLiteral("Velocity limit write failed"));
+    }
+}
 
 void MotorWorker::applyVelocityTorqueLimitRaw(int torqueLimitRaw)
 {

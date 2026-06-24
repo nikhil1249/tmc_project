@@ -60,6 +60,7 @@ public:
     bool readRunStatus(RunStatus *status);
 
     bool setVelocityTarget(qint32 targetVelocity);
+    bool setVelocityLimitRaw(qint32 limitRaw);
     bool setTorqueTarget(qint32 targetTorque);
     bool setVelocityTorqueLimit(qint32 torqueLimitRaw);
     bool prepareVelocityModeForRun();
@@ -67,6 +68,7 @@ public:
     bool emergencyStop();
     bool shutdownMotorSafe();
     bool holdAfterStall();
+    bool applyIdleStopSequence(const char *reason);
     void debugReadRunRegistersOnce();
 
     static qint16 lowSigned16(quint32 value);
@@ -144,7 +146,7 @@ private:
 
     // Python script limits. Keep GUI/software commands inside these limits.
     static constexpr qint32 PYTHON_CONST_VELOCITY_RAW = 4000000;
-    static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW  = 4000000;
+    static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW  = 10000000;
     static constexpr qint32 MAX_ALLOWED_TORQUE_RAW    = 3000;
     static constexpr qint32 MIN_VELOCITY_TORQUE_LIMIT_RAW = 0;
     static constexpr qint32 MAX_VELOCITY_TORQUE_LIMIT_RAW = 3000;
@@ -164,6 +166,7 @@ private:
     bool velocityModePrepared = false;
     bool torqueModePrepared = false;
     qint32 lastVelocityCommand = 0;
+    qint32 currentVelocityLimitRaw = MAX_ALLOWED_VELOCITY_RAW;
 
     void setBusy(bool busy);
     void setError(const QString &message);

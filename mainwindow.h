@@ -17,9 +17,7 @@ class QTextEdit;
 class QLineEdit;
 class QWidget;
 class QGridLayout;
-class QComboBox;
 class MotorWorker;
-class VelocityCalibrationDialog;
 
 class MainWindow : public QMainWindow
 {
@@ -34,6 +32,7 @@ signals:
     void workerReadStatus();
     void workerApplyTorque(int value);
     void workerApplyVelocityTorqueLimit(int torqueLimitRaw);
+    void workerApplyVelocityLimitRaw(qint32 limitRaw);
     void workerApplyVelocityRaw(qint32 rawVelocity);
     void workerEmergencyStop();
     void workerShutdown();
@@ -60,8 +59,6 @@ private slots:
     void onVelocityTorqueLimitEditingFinished();
     void onApplyVelocityTorqueLimitClicked();
     void onVelocityRangeChanged();
-    void onVelocityUnitChanged(int index);
-    void openVelocityCalibrationDialog();
 
     void onEstopClicked();
     void sendPendingTorqueCommand();
@@ -81,15 +78,11 @@ private:
     static constexpr int DEFAULT_BAUD_RATE = 115200;
     static constexpr int STATUS_TIMER_MS = 1000;
     static constexpr int COMMAND_DEBOUNCE_MS = 100;
-    static constexpr int MIN_ALLOWED_VALUE = -10000000;
-    static constexpr int MAX_ALLOWED_VALUE =  10000000;
-    // Velocity command is still sent to TMC6460 as raw value internally.
-    // GUI displays RPM using calibration equation: rpm = slope * raw + intercept.
+    static constexpr int MIN_ALLOWED_VALUE = -15000000;
+    static constexpr int MAX_ALLOWED_VALUE =  15000000;
     static constexpr int DEFAULT_VELMIN_RAW = -4000000;
     static constexpr int DEFAULT_VELMAX_RAW = 4000000;
     static constexpr int DEFAULT_VELOCITY_RAW = 4000000;
-    static constexpr double DEFAULT_VELOCITY_CAL_SLOPE = 0.0033;
-    static constexpr double DEFAULT_VELOCITY_CAL_INTERCEPT = -0.142;
     static constexpr int DEFAULT_TORQUEMIN_VALUE = -3000;
     static constexpr int DEFAULT_TORQUEMAX_VALUE = 3000;
     // This is the torque/current limit used while running in velocity mode.
@@ -117,13 +110,11 @@ private:
     QPushButton *applyTorqueButton = nullptr;
     QLabel *torqueValueLabel = nullptr;
 
-    QComboBox *velocityUnitCombo = nullptr;
     QSpinBox *velocityMinSpin = nullptr;
     QSpinBox *velocityMaxSpin = nullptr;
     QSlider *velocitySlider = nullptr;
     QSpinBox *velocityDirectSpin = nullptr;
     QPushButton *applyVelocityButton = nullptr;
-    QPushButton *velocityCalibrationButton = nullptr;
     QSpinBox *velocityTorqueLimitSpin = nullptr;
     QPushButton *applyVelocityTorqueLimitButton = nullptr;
     QLabel *velocityValueLabel = nullptr;
@@ -143,9 +134,6 @@ private:
     int pendingVelocityTorqueLimitRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
     int pendingVelocityDisplayValue = 0;
     qint32 pendingVelocityRaw = 0;
-    bool velocityUseRpm = false;
-    double velocityCalSlope = DEFAULT_VELOCITY_CAL_SLOPE;
-    double velocityCalIntercept = DEFAULT_VELOCITY_CAL_INTERCEPT;
     bool syncingUi = false;
     bool connectedToController = false;
     bool statusRequestPending = false;
@@ -173,8 +161,6 @@ private:
     void scheduleTorqueCommand(int value);
     void scheduleVelocityCommand(int displayVelocity);
     void applyVelocityTorqueLimitNow();
-    int rawToRpm(qint32 rawVelocity) const;
-    qint32 rpmToRaw(int rpmVelocity) const;
     int rawToVelocityDisplay(qint32 rawVelocity) const;
     qint32 velocityDisplayToRaw(int displayVelocity) const;
     QString velocityUnitText() const;
@@ -182,7 +168,6 @@ private:
     int defaultVelocityMinDisplay() const;
     int defaultVelocityMaxDisplay() const;
     int defaultVelocityDisplay() const;
-    void refreshVelocityUiForMode(bool keepCurrentRaw);
     void updateRange(QSpinBox *minSpin, QSpinBox *maxSpin, QSlider *slider, QSpinBox *directSpin, QLabel *valueLabel, const QString &suffix = QString());
     void setConnectedUi(bool connected);
     void setStatusText(const QString &text, bool ok);

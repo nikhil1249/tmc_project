@@ -1,10 +1,8 @@
 #include "mainwindow.h"
 #include "MotorWorker.h"
-#include "VelocityCalibrationDialog.h"
 
 #include <QApplication>
 #include <QCloseEvent>
-#include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -14,11 +12,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
-#include <QKeySequence>
 #include <QStandardPaths>
 #include <QTextEdit>
 #include <QStyle>
@@ -248,12 +244,6 @@ QWidget *MainWindow::createVelocityGroup()
     const int maxDisplay = qMax(defaultVelocityMinDisplay(), defaultVelocityMaxDisplay());
     const int defaultDisplay = qBound(minDisplay, defaultVelocityDisplay(), maxDisplay);
 
-    velocityUnitCombo = new QComboBox;
-    velocityUnitCombo->addItem(QStringLiteral("RAW"));
-    velocityUnitCombo->addItem(QStringLiteral("RPM"));
-    velocityUnitCombo->setCurrentIndex(velocityUseRpm ? 1 : 0);
-    velocityUnitCombo->setMinimumWidth(100);
-
     velocityMinSpin = new QSpinBox;
     velocityMinSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
     velocityMinSpin->setValue(minDisplay);
@@ -276,10 +266,6 @@ QWidget *MainWindow::createVelocityGroup()
     applyVelocityButton = new QPushButton("Apply Velocity");
     applyVelocityButton->setMinimumWidth(140);
 
-    velocityCalibrationButton = new QPushButton("RPM Equation");
-    velocityCalibrationButton->setToolTip("Enter RPM equation / derive from samples (Ctrl+Shift+M)");
-    velocityCalibrationButton->setMinimumWidth(140);
-
     velocityTorqueLimitSpin = new QSpinBox;
     velocityTorqueLimitSpin->setRange(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
                                       DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
@@ -288,7 +274,7 @@ QWidget *MainWindow::createVelocityGroup()
     velocityTorqueLimitSpin->setMinimumWidth(150);
     velocityTorqueLimitSpin->setKeyboardTracking(false);
 
-    applyVelocityTorqueLimitButton = new QPushButton("Apply Torque Limit");
+    applyVelocityTorqueLimitButton = new QPushButton("Apply Torque/Flux Limit");
     applyVelocityTorqueLimitButton->setMinimumWidth(160);
 
     velocitySlider = new QSlider(Qt::Horizontal);
@@ -296,7 +282,7 @@ QWidget *MainWindow::createVelocityGroup()
     velocitySlider->setValue(defaultDisplay);
     velocitySlider->setTracking(true);
     velocitySlider->setTickPosition(QSlider::TicksBelow);
-    velocitySlider->setTickInterval(velocityUseRpm ? 100 : 100000);
+    velocitySlider->setTickInterval(100000);
 
     velocityValueLabel = new QLabel(QString("%1 %2").arg(defaultDisplay).arg(velocityUnitText()));
     velocityValueLabel->setObjectName("blueValueLabel");
@@ -307,7 +293,7 @@ QWidget *MainWindow::createVelocityGroup()
     velocityTorqueLimitValueLabel->setMinimumWidth(140);
 
     layout->addWidget(new QLabel("Unit:"), 0, 0);
-    layout->addWidget(velocityUnitCombo, 0, 1);
+    layout->addWidget(new QLabel("RAW"), 0, 1);
     layout->addWidget(new QLabel("Min:"), 0, 2);
     layout->addWidget(velocityMinSpin, 0, 3);
     layout->addWidget(new QLabel("Max:"), 0, 4);
@@ -315,13 +301,12 @@ QWidget *MainWindow::createVelocityGroup()
     layout->addWidget(new QLabel("Direct Value:"), 0, 6);
     layout->addWidget(velocityDirectSpin, 0, 7);
     layout->addWidget(applyVelocityButton, 0, 8);
-    layout->addWidget(velocityCalibrationButton, 0, 9);
 
     layout->addWidget(velocitySlider, 1, 0, 1, 7);
     layout->addWidget(new QLabel("Value:"), 1, 7);
     layout->addWidget(velocityValueLabel, 1, 8, 1, 2);
 
-    layout->addWidget(new QLabel("Velocity Torque Limit:"), 2, 0);
+    layout->addWidget(new QLabel("Velocity Torque/Flux Limit:"), 2, 0);
     layout->addWidget(velocityTorqueLimitSpin, 2, 1);
     layout->addWidget(new QLabel("Limit:"), 2, 2);
     layout->addWidget(velocityTorqueLimitValueLabel, 2, 3);
@@ -345,8 +330,6 @@ QWidget *MainWindow::createLiveFeedbackPanel()
     addFeedbackItem(layout, "velocity_calc", "Velocity actual:", 0, 2);
     addFeedbackItem(layout, "torque_raw", "Torque raw:", 0, 3);
     addFeedbackItem(layout, "stall_status", "Stall:", 1, 0, "Not active");
-    addFeedbackItem(layout, "position_actual", "Position:", 1, 1);
-    addFeedbackItem(layout, "torque_flux_actual", "Torque/Flux:", 1, 2);
 
     for (int i = 0; i < 8; ++i)
     {
@@ -416,6 +399,8 @@ void MainWindow::setupWorkerThread()
             worker, &MotorWorker::applyTorque, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyVelocityTorqueLimit,
             worker, &MotorWorker::applyVelocityTorqueLimitRaw, Qt::QueuedConnection);
+    connect(this, &MainWindow::workerApplyVelocityLimitRaw,
+            worker, &MotorWorker::applyVelocityLimitRaw, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyVelocityRaw,
             worker, &MotorWorker::applyVelocityRaw, Qt::QueuedConnection);
     connect(this, &MainWindow::workerEmergencyStop,
@@ -451,16 +436,11 @@ void MainWindow::setupConnections()
     connect(torqueMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
     connect(torqueMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
 
-    connect(velocityUnitCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onVelocityUnitChanged);
     connect(velocitySlider, &QSlider::valueChanged, this, &MainWindow::onVelocitySliderValueChanged);
     connect(velocitySlider, &QSlider::sliderReleased, this, &MainWindow::onVelocitySliderReleased);
     connect(velocityDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityDirectValueChanged);
     connect(velocityDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onVelocityDirectEditingFinished);
     connect(applyVelocityButton, &QPushButton::clicked, this, &MainWindow::onApplyVelocityClicked);
-    connect(velocityCalibrationButton, &QPushButton::clicked, this, &MainWindow::openVelocityCalibrationDialog);
-    QShortcut *velocityCalibrationShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")), this);
-    connect(velocityCalibrationShortcut, &QShortcut::activated,
-            this, &MainWindow::openVelocityCalibrationDialog);
     connect(velocityTorqueLimitSpin, qOverload<int>(&QSpinBox::valueChanged),
             this, &MainWindow::onVelocityTorqueLimitValueChanged);
     connect(velocityTorqueLimitSpin, &QSpinBox::editingFinished,
@@ -677,25 +657,24 @@ void MainWindow::onVelocityRangeChanged()
 
     pendingVelocityDisplayValue = velocityDirectSpin->value();
     pendingVelocityRaw = velocityDisplayToRaw(pendingVelocityDisplayValue);
-}
 
-void MainWindow::onVelocityUnitChanged(int index)
-{
-    const bool newRpmMode = (index == 1);
-    if (velocityUseRpm == newRpmMode)
+    // Changing Min/Max must not resend FOC_PID_VELOCITY_TARGET.
+    // It only updates the GUI range and the controller velocity limit register.
+    const qint32 minRaw = velocityDisplayToRaw(velocityMinSpin->value());
+    const qint32 maxRaw = velocityDisplayToRaw(velocityMaxSpin->value());
+    const qint32 absLimitRaw = qMax(qAbs(minRaw), qAbs(maxRaw));
+
+    if (connectedToController && absLimitRaw > 0)
     {
-        return;
+        statusTimer.stop();
+        statusRequestPending = false;
+        logAction(QString("Velocity range changed: minRaw=%1 maxRaw=%2, updating FOC_PID_VELOCITY_LIMIT=%3")
+                  .arg(minRaw)
+                  .arg(maxRaw)
+                  .arg(absLimitRaw));
+        emit workerApplyVelocityLimitRaw(absLimitRaw);
     }
-
-    // Keep the same internal raw velocity while only changing the displayed unit.
-    velocityUseRpm = newRpmMode;
-    refreshVelocityUiForMode(true);
-
-    appendLog(QString("Velocity display mode changed to %1. Internal command remains raw=%2")
-              .arg(velocityUnitText())
-              .arg(pendingVelocityRaw));
 }
-
 
 void MainWindow::onEstopClicked()
 {
@@ -833,21 +812,7 @@ void MainWindow::onWorkerStatusReady(const Tmc6460QtInterface::RunStatus &runSta
     setFeedbackValue("current_mA", QString("%1 mA").arg(runStatus.torqueCurrentMilliAmp));
     setFeedbackValue("flux_raw", QString::number(runStatus.fluxActualRaw));
     setFeedbackValue("torque_raw", QString::number(runStatus.torqueActualRaw));
-    setFeedbackValue("position_actual", QString::number(runStatus.positionActual));
-    setFeedbackValue("position_actual", QString::number(runStatus.positionActual));
-
-    setFeedbackValue("torque_flux_actual","0x"+ QString("%1").arg(runStatus.torqueFluxActual, 8, 16, QLatin1Char('0')).toUpper());
-
-    if (velocityUseRpm)
-    {
-        const int actualRpm = rawToRpm(runStatus.velocityActualRaw);
-        setFeedbackValue("velocity_calc", QString("%1 rpm (%2 raw)").arg(actualRpm).arg(runStatus.velocityActualRaw));
-    }
-    else
-    {
-        const int actualRpm = rawToRpm(runStatus.velocityActualRaw);
-        setFeedbackValue("velocity_calc", QString("%1 raw (%2 rpm)").arg(runStatus.velocityActualRaw).arg(actualRpm));
-    }
+    setFeedbackValue("velocity_calc", QString("%1 raw").arg(runStatus.velocityActualRaw));
 
 }
 
@@ -898,141 +863,41 @@ void MainWindow::onWorkerStallStateChanged(bool stalled, const QString &message)
 }
 
 
-void MainWindow::openVelocityCalibrationDialog()
-{
-    VelocityCalibrationDialog dialog(velocityCalSlope, velocityCalIntercept, this);
-
-    if (dialog.exec() != QDialog::Accepted)
-    {
-        return;
-    }
-
-    const double slope = dialog.appliedSlope();
-    const double intercept = dialog.appliedIntercept();
-
-    if (qAbs(slope) < 1e-12)
-    {
-        showError(QStringLiteral("Invalid RPM equation. Slope is zero."));
-        return;
-    }
-
-    velocityCalSlope = slope;
-    velocityCalIntercept = intercept;
-
-    // After applying an equation, switch GUI to RPM mode automatically.
-    // RAW mode is still available from the Unit combo box.
-    velocityUseRpm = true;
-    if (velocityUnitCombo != nullptr)
-    {
-        QSignalBlocker blocker(velocityUnitCombo);
-        velocityUnitCombo->setCurrentIndex(1);
-    }
-    refreshVelocityUiForMode(true);
-
-    appendLog(QString("RPM equation applied: rpm = %1 * raw + %2")
-              .arg(velocityCalSlope, 0, 'g', 12)
-              .arg(velocityCalIntercept, 0, 'g', 12));
-}
-
-int MainWindow::rawToRpm(qint32 rawVelocity) const
-{
-    return qRound((velocityCalSlope * static_cast<double>(rawVelocity)) + velocityCalIntercept);
-}
-
-qint32 MainWindow::rpmToRaw(int rpmVelocity) const
-{
-    if (qAbs(velocityCalSlope) < 1e-12)
-    {
-        return 0;
-    }
-
-    const double raw = (static_cast<double>(rpmVelocity) - velocityCalIntercept) / velocityCalSlope;
-    return qBound<qint32>(DEFAULT_VELMIN_RAW,
-                          static_cast<qint32>(qRound(raw)),
-                          DEFAULT_VELMAX_RAW);
-}
-
 int MainWindow::rawToVelocityDisplay(qint32 rawVelocity) const
 {
-    if (velocityUseRpm)
-    {
-        return rawToRpm(rawVelocity);
-    }
-
-    return static_cast<int>(rawVelocity);
+    return static_cast<int>(qBound<qint32>(MIN_ALLOWED_VALUE, rawVelocity, MAX_ALLOWED_VALUE));
 }
 
 qint32 MainWindow::velocityDisplayToRaw(int displayVelocity) const
 {
-    if (velocityUseRpm)
-    {
-        return rpmToRaw(displayVelocity);
-    }
-
-    return qBound<qint32>(DEFAULT_VELMIN_RAW,
+    return qBound<qint32>(MIN_ALLOWED_VALUE,
                           static_cast<qint32>(displayVelocity),
-                          DEFAULT_VELMAX_RAW);
+                          MAX_ALLOWED_VALUE);
 }
 
 QString MainWindow::velocityUnitText() const
 {
-    return velocityUseRpm ? QStringLiteral("rpm") : QStringLiteral("raw");
+    return QStringLiteral("raw");
 }
 
 QString MainWindow::velocityUnitSuffix() const
 {
-    return velocityUseRpm ? QStringLiteral(" rpm") : QStringLiteral(" raw");
+    return QStringLiteral(" raw");
 }
 
 int MainWindow::defaultVelocityMinDisplay() const
 {
-    return rawToVelocityDisplay(DEFAULT_VELMIN_RAW);
+    return DEFAULT_VELMIN_RAW;
 }
 
 int MainWindow::defaultVelocityMaxDisplay() const
 {
-    return rawToVelocityDisplay(DEFAULT_VELMAX_RAW);
+    return DEFAULT_VELMAX_RAW;
 }
 
 int MainWindow::defaultVelocityDisplay() const
 {
-    return rawToVelocityDisplay(DEFAULT_VELOCITY_RAW);
-}
-
-void MainWindow::refreshVelocityUiForMode(bool keepCurrentRaw)
-{
-    const qint32 rawToKeep = keepCurrentRaw ? pendingVelocityRaw : DEFAULT_VELOCITY_RAW;
-
-    const int minDisplay = qMin(defaultVelocityMinDisplay(), defaultVelocityMaxDisplay());
-    const int maxDisplay = qMax(defaultVelocityMinDisplay(), defaultVelocityMaxDisplay());
-
-    int displayToKeep = rawToVelocityDisplay(rawToKeep);
-    displayToKeep = qBound(minDisplay, displayToKeep, maxDisplay);
-
-    syncingUi = true;
-    {
-        QSignalBlocker b1(velocityMinSpin);
-        QSignalBlocker b2(velocityMaxSpin);
-        QSignalBlocker b3(velocitySlider);
-        QSignalBlocker b4(velocityDirectSpin);
-
-        velocityMinSpin->setSuffix(velocityUnitSuffix());
-        velocityMaxSpin->setSuffix(velocityUnitSuffix());
-        velocityDirectSpin->setSuffix(velocityUnitSuffix());
-
-        velocityMinSpin->setValue(minDisplay);
-        velocityMaxSpin->setValue(maxDisplay);
-        velocitySlider->setRange(minDisplay, maxDisplay);
-        velocityDirectSpin->setRange(minDisplay, maxDisplay);
-        velocitySlider->setValue(displayToKeep);
-        velocityDirectSpin->setValue(displayToKeep);
-        velocitySlider->setTickInterval(velocityUseRpm ? 100 : 100000);
-    }
-    syncingUi = false;
-
-    pendingVelocityDisplayValue = displayToKeep;
-    pendingVelocityRaw = velocityDisplayToRaw(displayToKeep);
-    velocityValueLabel->setText(QString("%1 %2").arg(displayToKeep).arg(velocityUnitText()));
+    return DEFAULT_VELOCITY_RAW;
 }
 
 void MainWindow::appendLog(const QString &message)
