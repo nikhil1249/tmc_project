@@ -166,25 +166,25 @@ void MotorWorker::applyVelocityTorqueLimitRaw(int torqueLimitRaw)
 
     if (limitedTorqueLimit != torqueLimitRaw)
     {
-        emit logMessage(QStringLiteral("SAFETY: Velocity torque limit %1 clipped to %2")
+        emit logMessage(QStringLiteral("SAFETY: Velocity torque/flux limit %1 clipped to %2")
                         .arg(torqueLimitRaw)
                         .arg(limitedTorqueLimit));
     }
 
     if (!tmc->isOpen())
     {
-        emit commandDone(QStringLiteral("Velocity torque limit %1").arg(limitedTorqueLimit), false);
-        emit errorChanged(QStringLiteral("Cannot apply velocity torque limit: serial port is not open"));
+        emit commandDone(QStringLiteral("Velocity torque/flux limit %1").arg(limitedTorqueLimit), false);
+        emit errorChanged(QStringLiteral("Cannot apply velocity torque/flux limit: serial port is not open"));
         return;
     }
 
-    const bool ok = tmc->setVelocityTorqueLimit(limitedTorqueLimit);
+    const bool ok = tmc->setVelocityTorqueFluxLimit(limitedTorqueLimit);
 
-    emit commandDone(QStringLiteral("Velocity torque limit %1").arg(limitedTorqueLimit), ok);
+    emit commandDone(QStringLiteral("Velocity torque/flux limit %1").arg(limitedTorqueLimit), ok);
 
     if (!ok)
     {
-        emit errorChanged(QStringLiteral("Velocity torque limit write failed"));
+        emit errorChanged(QStringLiteral("Velocity torque/flux limit write failed"));
     }
 }
 

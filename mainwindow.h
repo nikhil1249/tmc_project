@@ -78,8 +78,8 @@ private:
     static constexpr int DEFAULT_BAUD_RATE = 115200;
     static constexpr int STATUS_TIMER_MS = 1000;
     static constexpr int COMMAND_DEBOUNCE_MS = 100;
-    static constexpr int MIN_ALLOWED_VALUE = -15000000;
-    static constexpr int MAX_ALLOWED_VALUE =  15000000;
+    static constexpr int MIN_ALLOWED_VALUE = -10000000;
+    static constexpr int MAX_ALLOWED_VALUE =  10000000;
     static constexpr int DEFAULT_VELMIN_RAW = -4000000;
     static constexpr int DEFAULT_VELMAX_RAW = 4000000;
     static constexpr int DEFAULT_VELOCITY_RAW = 4000000;
@@ -88,8 +88,8 @@ private:
     // This is the torque/current limit used while running in velocity mode.
     // It is not a torque-mode target. Change this default as needed for testing.
     static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MIN = 0;
-    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MAX = 3000;
-    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 3000;
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MAX = 10000;
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 1000;
 
     QThread workerThread;
     bool shutdownDone = false;
@@ -129,6 +129,7 @@ private:
     QTimer statusTimer;
     QTimer torqueCommandTimer;
     QTimer velocityCommandTimer;
+    QTimer velocityTorqueLimitCommandTimer;
 
     int pendingTorque = 0;
     int pendingVelocityTorqueLimitRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;

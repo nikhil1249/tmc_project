@@ -9,6 +9,5 @@ int main(int argc, char *argv[])
     MainWindow window;
     window.show();
 
-
     return application.exec();
 }

@@ -42,6 +42,7 @@ MainWindow::~MainWindow()
     statusTimer.stop();
     torqueCommandTimer.stop();
     velocityCommandTimer.stop();
+    velocityTorqueLimitCommandTimer.stop();
 
     if (!shutdownDone && worker != nullptr && workerThread.isRunning())
     {
@@ -65,6 +66,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     statusTimer.stop();
     torqueCommandTimer.stop();
     velocityCommandTimer.stop();
+    velocityTorqueLimitCommandTimer.stop();
 
     if (!shutdownDone && worker != nullptr && workerThread.isRunning())
     {
@@ -454,8 +456,10 @@ void MainWindow::setupConnections()
 
     torqueCommandTimer.setSingleShot(true);
     velocityCommandTimer.setSingleShot(true);
+    velocityTorqueLimitCommandTimer.setSingleShot(true);
     connect(&torqueCommandTimer, &QTimer::timeout, this, &MainWindow::sendPendingTorqueCommand);
     connect(&velocityCommandTimer, &QTimer::timeout, this, &MainWindow::sendPendingVelocityCommand);
+    connect(&velocityTorqueLimitCommandTimer, &QTimer::timeout, this, &MainWindow::applyVelocityTorqueLimitNow);
 
     connect(&statusTimer, &QTimer::timeout, this, &MainWindow::updateChipStatus);
 }
@@ -634,15 +638,25 @@ void MainWindow::onVelocityTorqueLimitValueChanged(int value)
     {
         velocityTorqueLimitValueLabel->setText(QString("%1 raw").arg(pendingVelocityTorqueLimitRaw));
     }
+
+    // Same behavior as velocity Min/Max: changing this field must update the
+    // controller limit register, but must not resend velocity target.
+    // The timer prevents many UART writes while using spin arrows.
+    if (connectedToController && !syncingUi)
+    {
+        velocityTorqueLimitCommandTimer.start(COMMAND_DEBOUNCE_MS);
+    }
 }
 
 void MainWindow::onVelocityTorqueLimitEditingFinished()
 {
+    velocityTorqueLimitCommandTimer.stop();
     applyVelocityTorqueLimitNow();
 }
 
 void MainWindow::onApplyVelocityTorqueLimitClicked()
 {
+    velocityTorqueLimitCommandTimer.stop();
     applyVelocityTorqueLimitNow();
 }
 
@@ -681,6 +695,7 @@ void MainWindow::onEstopClicked()
     clearError();
     torqueCommandTimer.stop();
     velocityCommandTimer.stop();
+    velocityTorqueLimitCommandTimer.stop();
 
     syncingUi = true;
     {
@@ -782,7 +797,11 @@ void MainWindow::applyVelocityTorqueLimitNow()
                                       pendingVelocityTorqueLimitRaw,
                                       DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
 
-    logAction(QString("Velocity torque limit raw=%1").arg(torqueLimitRaw));
+    statusTimer.stop();
+    statusRequestPending = false;
+
+    logAction(QString("Velocity torque/flux limit raw=%1, updating FOC_PID_TORQUE_FLUX_LIMITS")
+              .arg(torqueLimitRaw));
     emit workerApplyVelocityTorqueLimit(torqueLimitRaw);
 }
 

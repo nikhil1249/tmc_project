@@ -554,6 +554,11 @@ bool Tmc6460QtInterface::setVelocityLimitRaw(qint32 limitRaw)
 
 bool Tmc6460QtInterface::setVelocityTorqueLimit(qint32 torqueLimitRaw)
 {
+    return setVelocityTorqueFluxLimit(torqueLimitRaw);
+}
+
+bool Tmc6460QtInterface::setVelocityTorqueFluxLimit(qint32 torqueLimitRaw)
+{
     setBusy(true);
 
     const qint16 limitedTorque = static_cast<qint16>(qBound<qint32>(MIN_VELOCITY_TORQUE_LIMIT_RAW,
@@ -566,12 +571,12 @@ bool Tmc6460QtInterface::setVelocityTorqueLimit(qint32 torqueLimitRaw)
     // Do not change motor mode and do not write FOC_PID_TORQUE_FLUX_TARGET.
     const bool ok = writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_LIMITS,
                                          limitRegisterValue,
-                                         "FOC_PID_TORQUE_FLUX_LIMITS VELOCITY_LIMIT",
+                                         "FOC_PID_TORQUE_FLUX_LIMITS TORQUE_FLUX_LIMIT",
                                          false);
 
     if (ok)
     {
-        log(QString("ACTION: Velocity-mode torque limit=%1, flux limit=%2, register=%3")
+        log(QString("ACTION: Velocity-mode torque/flux limit: torque limit=%1, flux limit=%2, register=%3")
                 .arg(limitedTorque)
                 .arg(limitedTorque)
                 .arg(hex32(limitRegisterValue)));
@@ -662,7 +667,7 @@ bool Tmc6460QtInterface::applyIdleStopSequence(const char *reason)
     torqueModePrepared = false;
     estopActive = false;
 
-    log(QString("STOP: %1 sequence applied: VELOCITY_TARGET=0, TORQUE : TORQUE_FLUX_TARGET=0, PWM_ON/IDLE")
+    log(QString("STOP: %1 sequence applied: VELOCITY_TARGET=0 -> TORQUE -> TORQUE_FLUX_TARGET=0 -> PWM_ON/IDLE")
             .arg(QString::fromLatin1(reason)));
 
     return ok;
