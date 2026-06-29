@@ -3,34 +3,160 @@
  <class>MainWindow</class>
  <widget class="QMainWindow" name="MainWindow">
   <property name="geometry">
-   <rect>
-    <x>0</x>
-    <y>0</y>
-    <width>1074</width>
-    <height>695</height>
-   </rect>
-  </property>
-  <property name="minimumSize">
-   <size>
-    <width>1000</width>
-    <height>650</height>
-   </size>
+   <rect><x>0</x><y>0</y><width>1120</width><height>840</height></rect>
   </property>
   <property name="windowTitle">
-   <string>TMC Motor Control</string>
+   <string>TMC6460 Motor Control</string>
   </property>
-  <widget class="QWidget" name="centralwidget"/>
-  <widget class="QMenuBar" name="menubar">
-   <property name="geometry">
-    <rect>
-     <x>0</x>
-     <y>0</y>
-     <width>1074</width>
-     <height>26</height>
-    </rect>
-   </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QVBoxLayout" name="mainLayout">
+    <property name="leftMargin"><number>16</number></property>
+    <property name="topMargin"><number>14</number></property>
+    <property name="rightMargin"><number>16</number></property>
+    <property name="bottomMargin"><number>16</number></property>
+    <property name="spacing"><number>10</number></property>
+    <item>
+     <widget class="QLabel" name="titleLabel">
+      <property name="text"><string>TMC6460 Motor Control</string></property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="connectionGroupBox">
+      <property name="title"><string>Connection / Safety</string></property>
+      <layout class="QGridLayout" name="connectionLayout">
+       <property name="leftMargin"><number>16</number></property>
+       <property name="topMargin"><number>24</number></property>
+       <property name="rightMargin"><number>16</number></property>
+       <property name="bottomMargin"><number>16</number></property>
+       <property name="horizontalSpacing"><number>12</number></property>
+       <property name="verticalSpacing"><number>8</number></property>
+       <item row="0" column="0"><widget class="QLabel" name="bridgePortTextLabel"><property name="text"><string>Bridge COM Port:</string></property></widget></item>
+       <item row="0" column="1"><widget class="QLineEdit" name="portEdit"><property name="text"><string>COM6</string></property><property name="maximumWidth"><number>160</number></property></widget></item>
+       <item row="0" column="2"><widget class="QPushButton" name="connectButton"><property name="minimumWidth"><number>190</number></property><property name="text"><string>Connect + Initialize</string></property></widget></item>
+       <item row="0" column="3"><widget class="QPushButton" name="readRunStatusButton"><property name="minimumWidth"><number>150</number></property><property name="toolTip"><string>Log one full run-status snapshot for 0/90 degree calibration.</string></property><property name="text"><string>Read Run Status</string></property></widget></item>
+       <item row="0" column="4"><spacer name="connectionSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property></spacer></item>
+       <item row="0" column="5"><widget class="QPushButton" name="estopButton"><property name="minimumSize"><size><width>210</width><height>70</height></size></property><property name="text"><string>E-STOP</string></property></widget></item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="chipStatusGroupBox">
+      <property name="title"><string>Chip Status / Live Feedback</string></property>
+      <layout class="QGridLayout" name="chipStatusOuterLayout">
+       <property name="leftMargin"><number>16</number></property>
+       <property name="topMargin"><number>24</number></property>
+       <property name="rightMargin"><number>16</number></property>
+       <property name="bottomMargin"><number>16</number></property>
+       <property name="horizontalSpacing"><number>18</number></property>
+       <property name="verticalSpacing"><number>10</number></property>
+       <item row="0" column="0">
+        <widget class="QWidget" name="statusPanel" native="true">
+         <layout class="QGridLayout" name="statusPanelLayout">
+          <property name="leftMargin"><number>0</number></property>
+          <property name="topMargin"><number>0</number></property>
+          <property name="rightMargin"><number>0</number></property>
+          <property name="bottomMargin"><number>0</number></property>
+          <property name="horizontalSpacing"><number>12</number></property>
+          <property name="verticalSpacing"><number>10</number></property>
+          <item row="0" column="0"><widget class="QLabel" name="chipIdTextLabel"><property name="text"><string>Chip ID:</string></property></widget></item>
+          <item row="0" column="1"><widget class="QLabel" name="chipIdValueLabel"><property name="text"><string>----</string></property></widget></item>
+          <item row="0" column="2"><widget class="QLabel" name="statusTextLabel"><property name="text"><string>Status:</string></property></widget></item>
+          <item row="0" column="3"><widget class="QLabel" name="statusValueLabel"><property name="text"><string>Disconnected</string></property></widget></item>
+          <item row="1" column="0"><widget class="QLabel" name="errorTextTitleLabel"><property name="text"><string>Error:</string></property></widget></item>
+          <item row="1" column="1"><widget class="QLabel" name="errorDotLabel"><property name="text"><string>●</string></property></widget></item>
+          <item row="1" column="2" colspan="2"><widget class="QLabel" name="errorTextLabel"><property name="text"><string>No error</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+         </layout>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QWidget" name="liveFeedbackPanel" native="true">
+         <layout class="QGridLayout" name="liveFeedbackLayout">
+          <property name="leftMargin"><number>0</number></property>
+          <property name="topMargin"><number>0</number></property>
+          <property name="rightMargin"><number>0</number></property>
+          <property name="bottomMargin"><number>0</number></property>
+          <property name="horizontalSpacing"><number>18</number></property>
+          <property name="verticalSpacing"><number>8</number></property>
+          <item row="0" column="0"><widget class="QLabel" name="currentTitleLabel"><property name="text"><string>Current Iq:</string></property></widget></item>
+          <item row="0" column="1"><widget class="QLabel" name="currentValueLabel"><property name="minimumWidth"><number>110</number></property><property name="text"><string>-- mA</string></property></widget></item>
+          <item row="0" column="2"><widget class="QLabel" name="fluxTitleLabel"><property name="text"><string>Flux raw:</string></property></widget></item>
+          <item row="0" column="3"><widget class="QLabel" name="fluxValueLabel"><property name="minimumWidth"><number>110</number></property><property name="text"><string>--</string></property></widget></item>
+          <item row="0" column="4"><widget class="QLabel" name="velocityActualTitleLabel"><property name="text"><string>Velocity actual:</string></property></widget></item>
+          <item row="0" column="5"><widget class="QLabel" name="velocityActualValueLabel"><property name="minimumWidth"><number>110</number></property><property name="text"><string>--</string></property></widget></item>
+          <item row="0" column="6"><widget class="QLabel" name="torqueActualTitleLabel"><property name="text"><string>Torque raw:</string></property></widget></item>
+          <item row="0" column="7"><widget class="QLabel" name="torqueActualValueLabel"><property name="minimumWidth"><number>110</number></property><property name="text"><string>--</string></property></widget></item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="torqueGroupBox">
+      <property name="title"><string>Torque Control</string></property>
+      <layout class="QGridLayout" name="torqueLayout">
+       <property name="leftMargin"><number>16</number></property><property name="topMargin"><number>24</number></property><property name="rightMargin"><number>16</number></property><property name="bottomMargin"><number>16</number></property><property name="horizontalSpacing"><number>12</number></property><property name="verticalSpacing"><number>12</number></property>
+       <item row="0" column="0"><widget class="QLabel" name="torqueMinTextLabel"><property name="text"><string>Min:</string></property></widget></item>
+       <item row="0" column="1"><widget class="QSpinBox" name="torqueMinSpin"><property name="minimum"><number>-10000000</number></property><property name="maximum"><number>10000000</number></property><property name="value"><number>-3000</number></property><property name="minimumWidth"><number>130</number></property></widget></item>
+       <item row="0" column="2"><widget class="QLabel" name="torqueMaxTextLabel"><property name="text"><string>Max:</string></property></widget></item>
+       <item row="0" column="3"><widget class="QSpinBox" name="torqueMaxSpin"><property name="minimum"><number>-10000000</number></property><property name="maximum"><number>10000000</number></property><property name="value"><number>3000</number></property><property name="minimumWidth"><number>130</number></property></widget></item>
+       <item row="0" column="4"><widget class="QLabel" name="torqueDirectTextLabel"><property name="text"><string>Direct Value:</string></property></widget></item>
+       <item row="0" column="5"><widget class="QSpinBox" name="torqueDirectSpin"><property name="minimum"><number>-3000</number></property><property name="maximum"><number>3000</number></property><property name="value"><number>0</number></property><property name="keyboardTracking"><bool>false</bool></property><property name="minimumWidth"><number>150</number></property></widget></item>
+       <item row="0" column="6"><widget class="QLabel" name="torqueRawTextLabel"><property name="text"><string>RAW</string></property></widget></item>
+       <item row="0" column="7"><widget class="QPushButton" name="applyTorqueButton"><property name="minimumWidth"><number>130</number></property><property name="text"><string>Apply Torque</string></property></widget></item>
+       <item row="1" column="0" colspan="6"><widget class="QSlider" name="torqueSlider"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="minimum"><number>-3000</number></property><property name="maximum"><number>3000</number></property><property name="value"><number>0</number></property><property name="tracking"><bool>true</bool></property><property name="tickPosition"><enum>QSlider::TicksBelow</enum></property><property name="tickInterval"><number>250</number></property></widget></item>
+       <item row="1" column="6"><widget class="QLabel" name="torqueValueTextLabel"><property name="text"><string>Value:</string></property></widget></item>
+       <item row="1" column="7"><widget class="QLabel" name="torqueValueLabel"><property name="minimumWidth"><number>120</number></property><property name="text"><string>0</string></property></widget></item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="velocityGroupBox">
+      <property name="title"><string>Velocity Control</string></property>
+      <layout class="QGridLayout" name="velocityLayout">
+       <property name="leftMargin"><number>16</number></property><property name="topMargin"><number>24</number></property><property name="rightMargin"><number>16</number></property><property name="bottomMargin"><number>16</number></property><property name="horizontalSpacing"><number>12</number></property><property name="verticalSpacing"><number>12</number></property>
+       <item row="0" column="0" colspan="8">
+        <layout class="QHBoxLayout" name="velocityTopRowLayout">
+         <property name="spacing"><number>8</number></property>
+         <item><widget class="QLabel" name="velocityMinTextLabel"><property name="text"><string>Min:</string></property></widget></item>
+         <item><widget class="QSpinBox" name="velocityMinSpin"><property name="minimum"><number>-10000000</number></property><property name="maximum"><number>10000000</number></property><property name="value"><number>-4000000</number></property><property name="suffix"><string> raw</string></property><property name="minimumWidth"><number>140</number></property></widget></item>
+         <item><spacer name="velocityMinMaxSmallSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>16</width><height>20</height></size></property></spacer></item>
+         <item><widget class="QLabel" name="velocityMaxTextLabel"><property name="text"><string>Max:</string></property></widget></item>
+         <item><widget class="QSpinBox" name="velocityMaxSpin"><property name="minimum"><number>-10000000</number></property><property name="maximum"><number>10000000</number></property><property name="value"><number>4000000</number></property><property name="suffix"><string> raw</string></property><property name="minimumWidth"><number>140</number></property></widget></item>
+         <item><spacer name="velocityDirectStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeType"><enum>QSizePolicy::Expanding</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+         <item><widget class="QLabel" name="velocityDirectTextLabel"><property name="text"><string>Direct Value:</string></property></widget></item>
+         <item><widget class="QSpinBox" name="velocityDirectSpin"><property name="minimum"><number>-4000000</number></property><property name="maximum"><number>4000000</number></property><property name="value"><number>4000000</number></property><property name="suffix"><string> raw</string></property><property name="keyboardTracking"><bool>false</bool></property><property name="minimumWidth"><number>150</number></property></widget></item>
+         <item><widget class="QPushButton" name="applyVelocityButton"><property name="minimumWidth"><number>140</number></property><property name="text"><string>Apply Velocity</string></property></widget></item>
+        </layout>
+       </item>
+       <item row="1" column="0" colspan="6"><widget class="QSlider" name="velocitySlider"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="minimum"><number>-4000000</number></property><property name="maximum"><number>4000000</number></property><property name="value"><number>4000000</number></property><property name="tracking"><bool>true</bool></property><property name="tickPosition"><enum>QSlider::TicksBelow</enum></property><property name="tickInterval"><number>100000</number></property></widget></item>
+       <item row="1" column="6"><widget class="QLabel" name="velocityValueTextLabel"><property name="text"><string>Value:</string></property></widget></item>
+       <item row="1" column="7"><widget class="QLabel" name="velocityValueLabel"><property name="minimumWidth"><number>170</number></property><property name="text"><string>4000000 raw</string></property></widget></item>
+       <item row="2" column="0"><widget class="QLabel" name="velocityTorqueLimitTextLabel"><property name="text"><string>Velocity Torque/Flux Limit:</string></property></widget></item>
+       <item row="2" column="1"><widget class="QSpinBox" name="velocityTorqueLimitSpin"><property name="minimum"><number>0</number></property><property name="maximum"><number>3000</number></property><property name="value"><number>3000</number></property><property name="suffix"><string> raw</string></property><property name="keyboardTracking"><bool>false</bool></property><property name="minimumWidth"><number>150</number></property></widget></item>
+       <item row="2" column="2"><widget class="QPushButton" name="applyVelocityTorqueLimitButton"><property name="minimumWidth"><number>118</number></property><property name="maximumWidth"><number>135</number></property><property name="text"><string>Apply Torque/Flux</string></property></widget></item>
+       <item row="2" column="3" colspan="5">
+        <layout class="QHBoxLayout" name="directionButtonLayout">
+         <property name="spacing"><number>12</number></property>
+         <item><spacer name="directionStretch"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeType"><enum>QSizePolicy::Expanding</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+         <item><widget class="QPushButton" name="velocityCwButton"><property name="minimumWidth"><number>120</number></property><property name="maximumWidth"><number>120</number></property><property name="toolTip"><string>Velocity mode clockwise using the magnitude entered in Direct Value.</string></property><property name="text"><string>CW</string></property></widget></item>
+         <item><widget class="QPushButton" name="velocityCcwButton"><property name="minimumWidth"><number>120</number></property><property name="maximumWidth"><number>120</number></property><property name="toolTip"><string>Velocity mode anticlockwise using the magnitude entered in Direct Value.</string></property><property name="text"><string>CCW</string></property></widget></item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="logGroupBox">
+      <property name="title"><string>UART / Register Log</string></property>
+      <layout class="QVBoxLayout" name="logLayout">
+       <property name="leftMargin"><number>16</number></property><property name="topMargin"><number>24</number></property><property name="rightMargin"><number>16</number></property><property name="bottomMargin"><number>16</number></property>
+       <item><widget class="QTextEdit" name="logText"><property name="readOnly"><bool>true</bool></property><property name="minimumHeight"><number>260</number></property><property name="lineWrapMode"><enum>QTextEdit::NoWrap</enum></property></widget></item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
   </widget>
-  <widget class="QStatusBar" name="statusbar"/>
  </widget>
  <resources/>
  <connections/>

@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "ui_mainwindow.h"
 #include "MotorWorker.h"
 
 #include <QApplication>
@@ -23,6 +24,7 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
+    , ui(new Ui::MainWindow)
 {
     qRegisterMetaType<Tmc6460QtInterface::RunStatus>("Tmc6460QtInterface::RunStatus");
 
@@ -59,6 +61,8 @@ MainWindow::~MainWindow()
     {
         logFile.close();
     }
+
+    delete ui;
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -83,355 +87,51 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::buildUi()
 {
-    setWindowTitle("TMC6460 Motor Control");
-    resize(1120, 840);
-
-    QWidget *central = new QWidget(this);
-    QVBoxLayout *mainLayout = new QVBoxLayout(central);
-    mainLayout->setContentsMargins(16, 14, 16, 16);
-    mainLayout->setSpacing(10);
-
-    QLabel *title = new QLabel("TMC6460 Motor Control");
-    title->setObjectName("titleLabel");
-    mainLayout->addWidget(title);
-
-    // Row-1: connection and E-STOP together
-    mainLayout->addWidget(createTopConnectionRow());
-
-    // Row-2: chip status only
-    mainLayout->addWidget(createChipStatusGroup());
-
-    mainLayout->addWidget(createTorqueGroup());
-    mainLayout->addWidget(createVelocityGroup());
-    mainLayout->addWidget(createLogGroup(), 1);
-
-    setCentralWidget(central);
-}
-
-QWidget *MainWindow::createTopConnectionRow()
-{
-    QGroupBox *group = new QGroupBox("Connection / Safety");
-    QGridLayout *layout = new QGridLayout(group);
-    layout->setContentsMargins(16, 24, 16, 16);
-    layout->setHorizontalSpacing(12);
-    layout->setVerticalSpacing(8);
-
-    layout->addWidget(new QLabel("Bridge COM Port:"), 0, 0);
-
-    portEdit = new QLineEdit(DEFAULT_COM_PORT);
-    portEdit->setMaximumWidth(160);
-    layout->addWidget(portEdit, 0, 1);
-
-    connectButton = new QPushButton("Connect + Initialize");
-    connectButton->setMinimumWidth(190);
-    layout->addWidget(connectButton, 0, 2);
-
-    layout->addItem(new QSpacerItem(20, 10, QSizePolicy::Expanding, QSizePolicy::Minimum), 0, 3);
-
-    estopButton = new QPushButton("E-STOP");
-    estopButton->setObjectName("estopButton");
-    estopButton->setMinimumSize(210, 70);
-    layout->addWidget(estopButton, 0, 4);
-
-    layout->setColumnStretch(3, 1);
-    return group;
-}
-
-QWidget *MainWindow::createChipStatusGroup()
-{
-    QGroupBox *group = new QGroupBox("Chip Status / Live Feedback");
-    QGridLayout *layout = new QGridLayout(group);
-    layout->setContentsMargins(16, 24, 16, 16);
-    layout->setHorizontalSpacing(18);
-    layout->setVerticalSpacing(10);
-
-    QWidget *statusPanel = new QWidget(group);
-    QGridLayout *statusLayout = new QGridLayout(statusPanel);
-    statusLayout->setContentsMargins(0, 0, 0, 0);
-    statusLayout->setHorizontalSpacing(12);
-    statusLayout->setVerticalSpacing(10);
-
-    statusLayout->addWidget(new QLabel("Chip ID:"), 0, 0);
-    chipIdValueLabel = new QLabel("----");
-    chipIdValueLabel->setObjectName("blueValueLabel");
-    statusLayout->addWidget(chipIdValueLabel, 0, 1);
-
-    statusLayout->addWidget(new QLabel("Status:"), 0, 2);
-    statusValueLabel = new QLabel("Disconnected");
-    statusValueLabel->setObjectName("statusBad");
-    statusLayout->addWidget(statusValueLabel, 0, 3);
-
-    statusLayout->addWidget(new QLabel("Error:"), 1, 0);
-    errorDotLabel = new QLabel("●");
-    errorDotLabel->setObjectName("dotGreen");
-    statusLayout->addWidget(errorDotLabel, 1, 1);
-
-    errorTextLabel = new QLabel("No error");
-    errorTextLabel->setWordWrap(true);
-    statusLayout->addWidget(errorTextLabel, 1, 2, 1, 2);
-    statusLayout->setColumnStretch(4, 1);
-
-    layout->addWidget(statusPanel, 0, 0);
-    layout->addWidget(createLiveFeedbackPanel(), 0, 1);
-    layout->setColumnStretch(0, 1);
-    layout->setColumnStretch(1, 2);
-
-    return group;
-}
-
-QWidget *MainWindow::createTorqueGroup()
-{
-    QGroupBox *group = new QGroupBox("Torque Control");
-    QGridLayout *layout = new QGridLayout(group);
-    layout->setContentsMargins(16, 24, 16, 16);
-    layout->setHorizontalSpacing(12);
-    layout->setVerticalSpacing(12);
-
-    torqueMinSpin = new QSpinBox;
-    torqueMinSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
-    torqueMinSpin->setValue(DEFAULT_TORQUEMIN_VALUE);
-    torqueMinSpin->setMinimumWidth(130);
-
-    torqueMaxSpin = new QSpinBox;
-    torqueMaxSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
-    torqueMaxSpin->setValue(DEFAULT_TORQUEMAX_VALUE);
-    torqueMaxSpin->setMinimumWidth(130);
-
-    torqueDirectSpin = new QSpinBox;
-    torqueDirectSpin->setRange(DEFAULT_TORQUEMIN_VALUE, DEFAULT_TORQUEMAX_VALUE);
-    torqueDirectSpin->setValue(0);
-    torqueDirectSpin->setMinimumWidth(150);
-    torqueDirectSpin->setKeyboardTracking(false);
-
-    applyTorqueButton = new QPushButton("Apply Torque");
-    applyTorqueButton->setMinimumWidth(130);
-
-    torqueSlider = new QSlider(Qt::Horizontal);
-    torqueSlider->setRange(DEFAULT_TORQUEMIN_VALUE, DEFAULT_TORQUEMAX_VALUE);
-    torqueSlider->setValue(0);
-    torqueSlider->setTracking(true);
-    torqueSlider->setTickPosition(QSlider::TicksBelow);
-    torqueSlider->setTickInterval(250);
-
-    torqueValueLabel = new QLabel("0");
-    torqueValueLabel->setObjectName("blueValueLabel");
-    torqueValueLabel->setMinimumWidth(120);
-
-    layout->addWidget(new QLabel("Min:"), 0, 0);
-    layout->addWidget(torqueMinSpin, 0, 1);
-    layout->addWidget(new QLabel("Max:"), 0, 2);
-    layout->addWidget(torqueMaxSpin, 0, 3);
-    layout->addWidget(new QLabel("Direct Value:"), 0, 4);
-    layout->addWidget(torqueDirectSpin, 0, 5);
-    layout->addWidget(new QLabel("RAW"), 0, 6);
-    layout->addWidget(applyTorqueButton, 0, 7);
-
-    layout->addWidget(torqueSlider, 1, 0, 1, 6);
-    layout->addWidget(new QLabel("Value:"), 1, 6);
-    layout->addWidget(torqueValueLabel, 1, 7);
-
-    layout->setColumnStretch(4, 1);
-    return group;
-}
-
-QWidget *MainWindow::createVelocityGroup()
-{
-    QGroupBox *group = new QGroupBox("Velocity Control");
-    QGridLayout *layout = new QGridLayout(group);
-    layout->setContentsMargins(16, 24, 16, 16);
-    layout->setHorizontalSpacing(12);
-    layout->setVerticalSpacing(12);
-
-    const int minDisplay = qMin(defaultVelocityMinDisplay(), defaultVelocityMaxDisplay());
-    const int maxDisplay = qMax(defaultVelocityMinDisplay(), defaultVelocityMaxDisplay());
-    const int defaultDisplay = qBound(minDisplay, defaultVelocityDisplay(), maxDisplay);
-
-    velocityMinSpin = new QSpinBox;
-    velocityMinSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
-    velocityMinSpin->setValue(minDisplay);
-    velocityMinSpin->setSuffix(velocityUnitSuffix());
-    velocityMinSpin->setMinimumWidth(140);
-    velocityMinSpin->setKeyboardTracking(false);
-
-    velocityMaxSpin = new QSpinBox;
-    velocityMaxSpin->setRange(MIN_ALLOWED_VALUE, MAX_ALLOWED_VALUE);
-    velocityMaxSpin->setValue(maxDisplay);
-    velocityMaxSpin->setSuffix(velocityUnitSuffix());
-    velocityMaxSpin->setMinimumWidth(140);
-    velocityMaxSpin->setKeyboardTracking(false);
-
-    velocityDirectSpin = new QSpinBox;
-    velocityDirectSpin->setRange(minDisplay, maxDisplay);
-    velocityDirectSpin->setValue(defaultDisplay);
-    velocityDirectSpin->setSuffix(velocityUnitSuffix());
-    velocityDirectSpin->setMinimumWidth(150);
-    velocityDirectSpin->setKeyboardTracking(false);
-
-    applyVelocityButton = new QPushButton("Apply Velocity");
-    applyVelocityButton->setMinimumWidth(140);
-
-    velocityCwButton = new QPushButton("CW");
-    velocityCwButton->setMinimumWidth(90);
-    velocityCwButton->setToolTip("Run clockwise using the magnitude entered in Direct Value.");
-
-    velocityCcwButton = new QPushButton("CCW");
-    velocityCcwButton->setMinimumWidth(90);
-    velocityCcwButton->setToolTip("Run anticlockwise using the magnitude entered in Direct Value.");
-
-    velocityTorqueLimitSpin = new QSpinBox;
-    velocityTorqueLimitSpin->setRange(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
-                                      DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
-    velocityTorqueLimitSpin->setValue(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW);
-    velocityTorqueLimitSpin->setSuffix(" raw");
-    velocityTorqueLimitSpin->setMinimumWidth(150);
-    velocityTorqueLimitSpin->setKeyboardTracking(false);
-
-    applyVelocityTorqueLimitButton = new QPushButton("Apply T/F Limit");
-    applyVelocityTorqueLimitButton->setMinimumWidth(145);
-    applyVelocityTorqueLimitButton->setMaximumWidth(160);
-    applyVelocityTorqueLimitButton->setToolTip("Apply torque and flux limit");
-
-    velocitySlider = new QSlider(Qt::Horizontal);
-    velocitySlider->setRange(minDisplay, maxDisplay);
-    velocitySlider->setValue(defaultDisplay);
-    velocitySlider->setTracking(true);
-    velocitySlider->setTickPosition(QSlider::TicksBelow);
-    velocitySlider->setTickInterval(100000);
-
-    velocityValueLabel = new QLabel(QString("%1 %2").arg(defaultDisplay).arg(velocityUnitText()));
-    velocityValueLabel->setObjectName("blueValueLabel");
-    velocityValueLabel->setMinimumWidth(170);
-
-    velocityTorqueLimitValueLabel = new QLabel(QString("%1 raw").arg(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW));
-    velocityTorqueLimitValueLabel->setObjectName("blueValueLabel");
-    velocityTorqueLimitValueLabel->setMinimumWidth(120);
-
-    velocityTorqueLimitAppliedLabel = new QLabel(QString("%1 raw").arg(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW));
-    velocityTorqueLimitAppliedLabel->setObjectName("blueValueLabel");
-    velocityTorqueLimitAppliedLabel->setMinimumWidth(120);
-
-    /*
-     * Row 0:
-     * Min and Max at the left, large gap, then Direct Value and Apply Velocity.
-     */
-    QHBoxLayout *velocityTopRow = new QHBoxLayout;
-    velocityTopRow->setContentsMargins(0, 0, 0, 0);
-    velocityTopRow->setSpacing(8);
-
-    velocityTopRow->addWidget(new QLabel("Min:"));
-    velocityTopRow->addWidget(velocityMinSpin);
-
-    velocityTopRow->addSpacing(16);     // small gap between Min and Max
-
-    velocityTopRow->addWidget(new QLabel("Max:"));
-    velocityTopRow->addWidget(velocityMaxSpin);
-
-    velocityTopRow->addStretch(1);      // big gap before Direct Value
-
-    velocityTopRow->addWidget(new QLabel("Direct Value:"));
-    velocityTopRow->addWidget(velocityDirectSpin);
-    velocityTopRow->addWidget(applyVelocityButton);
-
-    layout->addLayout(velocityTopRow, 0, 0, 1, 11);
-    /*
-     * Row 1:
-     * Slider with live displayed velocity value.
-     */
-    layout->addWidget(velocitySlider, 1, 0, 1, 7);
-    layout->addWidget(new QLabel("Value:"), 1, 7);
-    layout->addWidget(velocityValueLabel, 1, 8);
-
-    /*
-     * Row 2:
-     * Limit input and edited value near each other.
-     * Gap.
-     * Apply button and applied value near each other.
-     * Big gap.
-     * CW and CCW at the right.
-     */
-    layout->addWidget(new QLabel("Velocity Torque/Flux Limit:"), 2, 0);
-    layout->addWidget(velocityTorqueLimitSpin, 2, 1);
-
-    layout->addWidget(applyVelocityTorqueLimitButton, 2, 2);
-
-    QHBoxLayout *directionButtonLayout = new QHBoxLayout;
-    directionButtonLayout->setContentsMargins(0, 0, 0, 0);
-    directionButtonLayout->setSpacing(12);
-
-    velocityCwButton->setMinimumWidth(120);
-    velocityCwButton->setMaximumWidth(120);
-
-    velocityCcwButton->setMinimumWidth(120);
-    velocityCcwButton->setMaximumWidth(120);
-
-    directionButtonLayout->addStretch(1);
-    directionButtonLayout->addWidget(velocityCwButton);
-    directionButtonLayout->addWidget(velocityCcwButton);
-
-    layout->addLayout(directionButtonLayout, 2, 6, 1, 5);
-
-    layout->setColumnStretch(0, 0);   // Min label
-    layout->setColumnStretch(1, 0);   // Min spin
-    layout->setColumnStretch(2, 0);   // Max label
-    layout->setColumnStretch(3, 0);   // Max spin
-
-    layout->setColumnStretch(4, 4);   // large gap after Min/Max
-    layout->setColumnStretch(5, 0);
-
-    layout->setColumnStretch(6, 0);   // Direct Value label
-    layout->setColumnStretch(7, 0);   // Direct Value spin
-    layout->setColumnStretch(8, 0);   // Apply Velocity
-
-    layout->setColumnStretch(9, 3);   // gap before CW/CCW if used
-    layout->setColumnStretch(10, 0);
-    return group;
-}
-
-QWidget *MainWindow::createLiveFeedbackPanel()
-{
-    QWidget *panel = new QWidget;
-    QGridLayout *layout = new QGridLayout(panel);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setHorizontalSpacing(18);
-    layout->setVerticalSpacing(8);
-
-    // Scalable feedback layout: to add a new feedback item later, add one more line here.
-    addFeedbackItem(layout, "current_mA", "Current Iq:", 0, 0, "-- mA");
-    addFeedbackItem(layout, "flux_raw", "Flux raw:", 0, 1);
-    addFeedbackItem(layout, "velocity_calc", "Velocity actual:", 0, 2);
-    addFeedbackItem(layout, "torque_raw", "Torque raw:", 0, 3);
-    // addFeedbackItem(layout, "stall_status", "Stall:", 1, 0, "Not active");
-
-    for (int i = 0; i < 8; ++i)
-    {
-        layout->setColumnStretch(i, 1);
-    }
-
-    return panel;
-}
-
-QWidget *MainWindow::createLogGroup()
-{
-    QGroupBox *group = new QGroupBox("UART / Register Log");
-    QVBoxLayout *layout = new QVBoxLayout(group);
-    layout->setContentsMargins(16, 24, 16, 16);
-
-    logText = new QTextEdit;
-    logText->setReadOnly(true);
-    logText->setMinimumHeight(260);
-    logText->setLineWrapMode(QTextEdit::NoWrap);
-    layout->addWidget(logText);
-
-    return group;
+    ui->setupUi(this);
+
+    ui->chipIdValueLabel->setObjectName("blueValueLabel");
+    ui->statusValueLabel->setObjectName("statusBad");
+    ui->errorDotLabel->setObjectName("dotGreen");
+
+    ui->torqueValueLabel->setObjectName("blueValueLabel");
+    ui->velocityValueLabel->setObjectName("blueValueLabel");
+
+    ui->currentTitleLabel->setObjectName("feedbackTitleLabel");
+    ui->fluxTitleLabel->setObjectName("feedbackTitleLabel");
+    ui->velocityActualTitleLabel->setObjectName("feedbackTitleLabel");
+    ui->torqueActualTitleLabel->setObjectName("feedbackTitleLabel");
+
+    ui->currentValueLabel->setObjectName("feedbackValueLabel");
+    ui->fluxValueLabel->setObjectName("feedbackValueLabel");
+    ui->velocityActualValueLabel->setObjectName("feedbackValueLabel");
+    ui->torqueActualValueLabel->setObjectName("feedbackValueLabel");
+
+    feedbackLabels.insert(QStringLiteral("current_mA"), ui->currentValueLabel);
+    feedbackLabels.insert(QStringLiteral("flux_raw"), ui->fluxValueLabel);
+    feedbackLabels.insert(QStringLiteral("velocity_calc"), ui->velocityActualValueLabel);
+    feedbackLabels.insert(QStringLiteral("torque_raw"), ui->torqueActualValueLabel);
+
+    ui->portEdit->setText(QString::fromLatin1(DEFAULT_COM_PORT));
+
+    ui->velocityMinSpin->setValue(defaultVelocityMinDisplay());
+    ui->velocityMaxSpin->setValue(defaultVelocityMaxDisplay());
+    ui->velocityDirectSpin->setRange(defaultVelocityMinDisplay(), defaultVelocityMaxDisplay());
+    ui->velocityDirectSpin->setValue(defaultVelocityDisplay());
+    ui->velocitySlider->setRange(defaultVelocityMinDisplay(), defaultVelocityMaxDisplay());
+    ui->velocitySlider->setValue(defaultVelocityDisplay());
+    ui->velocityValueLabel->setText(QString("%1 %2").arg(defaultVelocityDisplay()).arg(velocityUnitText()));
+
+    ui->velocityTorqueLimitSpin->setValue(DEFAULT_VELOCITY_TORQUE_LIMIT_RAW);
+    pendingVelocityTorqueLimitRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
 }
 
 void MainWindow::applyStyleSheet()
 {
     setStyleSheet(
         "QMainWindow { background-color: #F5F7FA; }"
-        "QWidget { font-family: Segoe UI; font-size: 14px; color: #111827; }"
-        "#titleLabel { font-size: 28px; font-weight: bold; color: #111827; padding: 4px; }"
-        "QGroupBox { background-color: #FFFFFF; border: 1px solid #D1D5DB; border-radius: 10px; margin-top: 12px; font-size: 17px; font-weight: bold; }"
+        "QWidget { font-family: Segoe UI; font-size: 12px; color: #111827; }"
+        "#titleLabel { font-size: 24px; font-weight: bold; color: #111827; padding: 4px; }"
+        "QGroupBox { background-color: #FFFFFF; border: 1px solid #D1D5DB; border-radius: 10px; margin-top: 12px; font-size: 14px; font-weight: bold; }"
         "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0px 8px; left: 12px; }"
         "QLineEdit, QSpinBox { background-color: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; padding: 5px; font-size: 15px; }"
         "QPushButton { background-color: #2563EB; color: white; border-radius: 7px; padding: 8px 16px; font-weight: bold; }"
@@ -444,11 +144,11 @@ void MainWindow::applyStyleSheet()
         "QSlider::groove:horizontal { height: 8px; background: #D1D5DB; border-radius: 4px; }"
         "QSlider::handle:horizontal { background: #2563EB; border: 2px solid #1D4ED8; width: 22px; height: 22px; margin: -8px 0; border-radius: 11px; }"
         "QSlider::sub-page:horizontal { background: #2563EB; border-radius: 4px; }"
-        "#blueValueLabel { color: #1D4ED8; font-size: 20px; font-weight: bold; }"
-        "#feedbackValueLabel { color: #0F766E; font-size: 20px; font-weight: bold; }"
+        "#blueValueLabel { color: #1D4ED8; font-size: 16px; font-weight: bold; }"
+        "#feedbackValueLabel { color: #0F766E; font-size: 16px; font-weight: bold; }"
         "#feedbackTitleLabel { color: #111827; font-size: 14px; font-weight: normal; }"
-        "#statusGood { background-color: #ECFDF5; color: #16A34A; border: 1px solid #BBF7D0; border-radius: 8px; padding: 8px 20px; font-size: 17px; font-weight: bold; }"
-        "#statusBad { background-color: #FEF2F2; color: #DC2626; border: 1px solid #FCA5A5; border-radius: 8px; padding: 8px 20px; font-size: 17px; font-weight: bold; }"
+        "#statusGood { background-color: #ECFDF5; color: #16A34A; border: 1px solid #BBF7D0; border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: bold; }"
+        "#statusBad { background-color: #FEF2F2; color: #DC2626; border: 1px solid #FCA5A5; border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: bold; }"
         "#dotGreen { color: #16A34A; font-size: 26px; }"
         "#dotRed { color: #DC2626; font-size: 26px; }"
         "QTextEdit { background-color: #0F172A; color: #E5E7EB; border-radius: 8px; font-family: Consolas; font-size: 12px; }"
@@ -466,6 +166,8 @@ void MainWindow::setupWorkerThread()
             worker, &MotorWorker::connectAndInitialize, Qt::QueuedConnection);
     connect(this, &MainWindow::workerReadStatus,
             worker, &MotorWorker::readStatus, Qt::QueuedConnection);
+    connect(this, &MainWindow::workerReadRunStatusSnapshot,
+            worker, &MotorWorker::readRunStatusSnapshot, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyTorque,
             worker, &MotorWorker::applyTorque, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyVelocityTorqueLimit,
@@ -497,33 +199,34 @@ void MainWindow::setupWorkerThread()
 
 void MainWindow::setupConnections()
 {
-    connect(connectButton, &QPushButton::clicked, this, &MainWindow::connectAndInitialize);
+    connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::connectAndInitialize);
+    connect(ui->readRunStatusButton, &QPushButton::clicked, this, &MainWindow::onReadRunStatusClicked);
 
-    connect(torqueSlider, &QSlider::valueChanged, this, &MainWindow::onTorqueSliderValueChanged);
-    connect(torqueSlider, &QSlider::sliderReleased, this, &MainWindow::onTorqueSliderReleased);
-    connect(torqueDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueDirectValueChanged);
-    connect(torqueDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onTorqueDirectEditingFinished);
-    connect(applyTorqueButton, &QPushButton::clicked, this, &MainWindow::onApplyTorqueClicked);
-    connect(torqueMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
-    connect(torqueMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
+    connect(ui->torqueSlider, &QSlider::valueChanged, this, &MainWindow::onTorqueSliderValueChanged);
+    connect(ui->torqueSlider, &QSlider::sliderReleased, this, &MainWindow::onTorqueSliderReleased);
+    connect(ui->torqueDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueDirectValueChanged);
+    connect(ui->torqueDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onTorqueDirectEditingFinished);
+    connect(ui->applyTorqueButton, &QPushButton::clicked, this, &MainWindow::onApplyTorqueClicked);
+    connect(ui->torqueMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
+    connect(ui->torqueMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onTorqueRangeChanged);
 
-    connect(velocitySlider, &QSlider::valueChanged, this, &MainWindow::onVelocitySliderValueChanged);
-    connect(velocitySlider, &QSlider::sliderReleased, this, &MainWindow::onVelocitySliderReleased);
-    connect(velocityDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityDirectValueChanged);
-    connect(velocityDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onVelocityDirectEditingFinished);
-    connect(applyVelocityButton, &QPushButton::clicked, this, &MainWindow::onApplyVelocityClicked);
-    connect(velocityCwButton, &QPushButton::clicked, this, &MainWindow::onVelocityCwClicked);
-    connect(velocityCcwButton, &QPushButton::clicked, this, &MainWindow::onVelocityCcwClicked);
-    connect(velocityTorqueLimitSpin, qOverload<int>(&QSpinBox::valueChanged),
+    connect(ui->velocitySlider, &QSlider::valueChanged, this, &MainWindow::onVelocitySliderValueChanged);
+    connect(ui->velocitySlider, &QSlider::sliderReleased, this, &MainWindow::onVelocitySliderReleased);
+    connect(ui->velocityDirectSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityDirectValueChanged);
+    connect(ui->velocityDirectSpin, &QSpinBox::editingFinished, this, &MainWindow::onVelocityDirectEditingFinished);
+    connect(ui->applyVelocityButton, &QPushButton::clicked, this, &MainWindow::onApplyVelocityClicked);
+    connect(ui->velocityCwButton, &QPushButton::clicked, this, &MainWindow::onVelocityCwClicked);
+    connect(ui->velocityCcwButton, &QPushButton::clicked, this, &MainWindow::onVelocityCcwClicked);
+    connect(ui->velocityTorqueLimitSpin, qOverload<int>(&QSpinBox::valueChanged),
             this, &MainWindow::onVelocityTorqueLimitValueChanged);
-    connect(velocityTorqueLimitSpin, &QSpinBox::editingFinished,
+    connect(ui->velocityTorqueLimitSpin, &QSpinBox::editingFinished,
             this, &MainWindow::onVelocityTorqueLimitEditingFinished);
-    connect(applyVelocityTorqueLimitButton, &QPushButton::clicked,
+    connect(ui->applyVelocityTorqueLimitButton, &QPushButton::clicked,
             this, &MainWindow::onApplyVelocityTorqueLimitClicked);
-    connect(velocityMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
-    connect(velocityMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
+    connect(ui->velocityMinSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
+    connect(ui->velocityMaxSpin, qOverload<int>(&QSpinBox::valueChanged), this, &MainWindow::onVelocityRangeChanged);
 
-    connect(estopButton, &QPushButton::clicked, this, &MainWindow::onEstopClicked);
+    connect(ui->estopButton, &QPushButton::clicked, this, &MainWindow::onEstopClicked);
 
     torqueCommandTimer.setSingleShot(true);
     velocityCommandTimer.setSingleShot(true);
@@ -550,28 +253,6 @@ void MainWindow::setupLogFile()
     }
 }
 
-QLabel *MainWindow::addFeedbackItem(QGridLayout *layout,
-                                    const QString &key,
-                                    const QString &title,
-                                    int row,
-                                    int columnPair,
-                                    const QString &defaultValue)
-{
-    QLabel *titleLabel = new QLabel(title);
-    titleLabel->setObjectName("feedbackTitleLabel");
-
-    QLabel *valueLabel = new QLabel(defaultValue);
-    valueLabel->setObjectName("feedbackValueLabel");
-    valueLabel->setMinimumWidth(110);
-
-    const int col = columnPair * 2;
-    layout->addWidget(titleLabel, row, col);
-    layout->addWidget(valueLabel, row, col + 1);
-
-    feedbackLabels.insert(key, valueLabel);
-    return valueLabel;
-}
-
 void MainWindow::setFeedbackValue(const QString &key, const QString &value)
 {
     QLabel *label = feedbackLabels.value(key, nullptr);
@@ -587,17 +268,17 @@ void MainWindow::connectAndInitialize()
     statusRequestPending = false;
 
     clearError();
-    logAction(QString("Connect + Initialize requested on %1").arg(portEdit->text().trimmed()));
+    logAction(QString("Connect + Initialize requested on %1").arg(ui->portEdit->text().trimmed()));
 
-    connectButton->setEnabled(false);
+    ui->connectButton->setEnabled(false);
     setStatusText("Connecting...", false);
 
-    emit workerConnectAndInitialize(portEdit->text().trimmed(), DEFAULT_BAUD_RATE);
+    emit workerConnectAndInitialize(ui->portEdit->text().trimmed(), DEFAULT_BAUD_RATE);
 }
 
 void MainWindow::onWorkerConnected(bool ok, quint32 chipId, const QString &message)
 {
-    connectButton->setEnabled(true);
+    ui->connectButton->setEnabled(true);
 
     if (!ok)
     {
@@ -608,7 +289,7 @@ void MainWindow::onWorkerConnected(bool ok, quint32 chipId, const QString &messa
     }
 
     QString tempString = "0x";
-    chipIdValueLabel->setText(tempString + QString("%1").arg(chipId, 8, 16, QLatin1Char('0')).toUpper());
+    ui->chipIdValueLabel->setText(tempString + QString("%1").arg(chipId, 8, 16, QLatin1Char('0')).toUpper());
     setConnectedUi(true);
     appendLog(message);
     statusTimer.start(STATUS_TIMER_MS);
@@ -616,15 +297,15 @@ void MainWindow::onWorkerConnected(bool ok, quint32 chipId, const QString &messa
 
 void MainWindow::onTorqueSliderValueChanged(int value)
 {
-    torqueValueLabel->setText(QString::number(value));
+    ui->torqueValueLabel->setText(QString::number(value));
 
-    QSignalBlocker blocker(torqueDirectSpin);
-    torqueDirectSpin->setValue(value);
+    QSignalBlocker blocker(ui->torqueDirectSpin);
+    ui->torqueDirectSpin->setValue(value);
 }
 
 void MainWindow::onTorqueSliderReleased()
 {
-    scheduleTorqueCommand(torqueSlider->value());
+    scheduleTorqueCommand(ui->torqueSlider->value());
 }
 
 void MainWindow::onTorqueDirectValueChanged(int value)
@@ -634,24 +315,24 @@ void MainWindow::onTorqueDirectValueChanged(int value)
         return;
     }
 
-    QSignalBlocker blocker(torqueSlider);
-    torqueSlider->setValue(value);
-    torqueValueLabel->setText(QString::number(value));
+    QSignalBlocker blocker(ui->torqueSlider);
+    ui->torqueSlider->setValue(value);
+    ui->torqueValueLabel->setText(QString::number(value));
 }
 
 void MainWindow::onTorqueDirectEditingFinished()
 {
-    scheduleTorqueCommand(torqueDirectSpin->value());
+    scheduleTorqueCommand(ui->torqueDirectSpin->value());
 }
 
 void MainWindow::onApplyTorqueClicked()
 {
-    scheduleTorqueCommand(torqueDirectSpin->value());
+    scheduleTorqueCommand(ui->torqueDirectSpin->value());
 }
 
 void MainWindow::onTorqueRangeChanged()
 {
-    updateRange(torqueMinSpin, torqueMaxSpin, torqueSlider, torqueDirectSpin, torqueValueLabel);
+    updateRange(ui->torqueMinSpin, ui->torqueMaxSpin, ui->torqueSlider, ui->torqueDirectSpin, ui->torqueValueLabel);
 }
 
 void MainWindow::onVelocitySliderValueChanged(int displayVelocity)
@@ -663,15 +344,15 @@ void MainWindow::onVelocitySliderValueChanged(int displayVelocity)
 
     pendingVelocityDisplayValue = displayVelocity;
     pendingVelocityRaw = velocityDisplayToRaw(displayVelocity);
-    velocityValueLabel->setText(QString("%1 %2").arg(displayVelocity).arg(velocityUnitText()));
+    ui->velocityValueLabel->setText(QString("%1 %2").arg(displayVelocity).arg(velocityUnitText()));
 
-    QSignalBlocker blocker(velocityDirectSpin);
-    velocityDirectSpin->setValue(displayVelocity);
+    QSignalBlocker blocker(ui->velocityDirectSpin);
+    ui->velocityDirectSpin->setValue(displayVelocity);
 }
 
 void MainWindow::onVelocitySliderReleased()
 {
-    scheduleVelocityCommand(velocitySlider->value());
+    scheduleVelocityCommand(ui->velocitySlider->value());
 }
 
 void MainWindow::onVelocityDirectValueChanged(int displayVelocity)
@@ -684,19 +365,19 @@ void MainWindow::onVelocityDirectValueChanged(int displayVelocity)
     pendingVelocityDisplayValue = displayVelocity;
     pendingVelocityRaw = velocityDisplayToRaw(displayVelocity);
 
-    QSignalBlocker blocker(velocitySlider);
-    velocitySlider->setValue(displayVelocity);
-    velocityValueLabel->setText(QString("%1 %2").arg(displayVelocity).arg(velocityUnitText()));
+    QSignalBlocker blocker(ui->velocitySlider);
+    ui->velocitySlider->setValue(displayVelocity);
+    ui->velocityValueLabel->setText(QString("%1 %2").arg(displayVelocity).arg(velocityUnitText()));
 }
 
 void MainWindow::onVelocityDirectEditingFinished()
 {
-    scheduleVelocityCommand(velocityDirectSpin->value());
+    scheduleVelocityCommand(ui->velocityDirectSpin->value());
 }
 
 void MainWindow::onApplyVelocityClicked()
 {
-    scheduleVelocityCommand(velocityDirectSpin->value());
+    scheduleVelocityCommand(ui->velocityDirectSpin->value());
 }
 
 void MainWindow::onVelocityCwClicked()
@@ -709,16 +390,12 @@ void MainWindow::onVelocityCcwClicked()
     applyVelocityFromDirectWithDirection(-1);
 }
 
+
 void MainWindow::onVelocityTorqueLimitValueChanged(int value)
 {
     pendingVelocityTorqueLimitRaw = qBound(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
                                            value,
                                            DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
-
-    if (velocityTorqueLimitValueLabel != nullptr)
-    {
-        velocityTorqueLimitValueLabel->setText(QString("%1 raw").arg(pendingVelocityTorqueLimitRaw));
-    }
 
     // Same behavior as velocity Min/Max: changing this field must update the
     // controller limit register, but must not resend velocity target.
@@ -743,20 +420,20 @@ void MainWindow::onApplyVelocityTorqueLimitClicked()
 
 void MainWindow::onVelocityRangeChanged()
 {
-    updateRange(velocityMinSpin,
-                velocityMaxSpin,
-                velocitySlider,
-                velocityDirectSpin,
-                velocityValueLabel,
+    updateRange(ui->velocityMinSpin,
+                ui->velocityMaxSpin,
+                ui->velocitySlider,
+                ui->velocityDirectSpin,
+                ui->velocityValueLabel,
                 velocityUnitSuffix());
 
-    pendingVelocityDisplayValue = velocityDirectSpin->value();
+    pendingVelocityDisplayValue = ui->velocityDirectSpin->value();
     pendingVelocityRaw = velocityDisplayToRaw(pendingVelocityDisplayValue);
 
     // Changing Min/Max must not resend FOC_PID_VELOCITY_TARGET.
     // It only updates the GUI range and the controller velocity limit register.
-    const qint32 minRaw = velocityDisplayToRaw(velocityMinSpin->value());
-    const qint32 maxRaw = velocityDisplayToRaw(velocityMaxSpin->value());
+    const qint32 minRaw = velocityDisplayToRaw(ui->velocityMinSpin->value());
+    const qint32 maxRaw = velocityDisplayToRaw(ui->velocityMaxSpin->value());
     const qint32 absLimitRaw = qMax(qAbs(minRaw), qAbs(maxRaw));
 
     if (connectedToController && absLimitRaw > 0)
@@ -780,20 +457,20 @@ void MainWindow::onEstopClicked()
 
     syncingUi = true;
     {
-        QSignalBlocker b1(torqueSlider);
-        QSignalBlocker b2(torqueDirectSpin);
-        QSignalBlocker b3(velocitySlider);
-        QSignalBlocker b4(velocityDirectSpin);
+        QSignalBlocker b1(ui->torqueSlider);
+        QSignalBlocker b2(ui->torqueDirectSpin);
+        QSignalBlocker b3(ui->velocitySlider);
+        QSignalBlocker b4(ui->velocityDirectSpin);
 
-        torqueSlider->setValue(0);
-        torqueDirectSpin->setValue(0);
-        velocitySlider->setValue(0);
-        velocityDirectSpin->setValue(0);
+        ui->torqueSlider->setValue(0);
+        ui->torqueDirectSpin->setValue(0);
+        ui->velocitySlider->setValue(0);
+        ui->velocityDirectSpin->setValue(0);
     }
     syncingUi = false;
 
-    torqueValueLabel->setText("0");
-    velocityValueLabel->setText(QString("0 %1").arg(velocityUnitText()));
+    ui->torqueValueLabel->setText("0");
+    ui->velocityValueLabel->setText(QString("0 %1").arg(velocityUnitText()));
     pendingVelocityDisplayValue = 0;
     pendingVelocityRaw = 0;
 
@@ -801,7 +478,27 @@ void MainWindow::onEstopClicked()
     emit workerEmergencyStop();
 
     setStatusText("E-STOP", false);
-    showError("Emergency stop active. Driver disable requested.");
+    showError("Safe E-STOP hold active. Driver remains enabled to hold the load.");
+}
+
+
+void MainWindow::onReadRunStatusClicked()
+{
+    if (!connectedToController)
+    {
+        appendLog("RUN_STATUS[MANUAL]: skipped - not connected");
+        return;
+    }
+
+    statusTimer.stop();
+    statusRequestPending = false;
+    appendLog("ACTION: Manual run-status snapshot requested");
+    emit workerReadRunStatusSnapshot(QStringLiteral("MANUAL"));
+
+    if (!statusTimer.isActive())
+    {
+        statusTimer.start(STATUS_TIMER_MS);
+    }
 }
 
 void MainWindow::scheduleTorqueCommand(int value)
@@ -822,8 +519,8 @@ void MainWindow::scheduleVelocityCommand(int displayVelocity)
         return;
     }
 
-    const int minValue = velocityMinSpin->value();
-    const int maxValue = velocityMaxSpin->value();
+    const int minValue = ui->velocityMinSpin->value();
+    const int maxValue = ui->velocityMaxSpin->value();
     pendingVelocityDisplayValue = qBound(minValue, displayVelocity, maxValue);
     pendingVelocityRaw = velocityDisplayToRaw(pendingVelocityDisplayValue);
 
@@ -873,19 +570,19 @@ void MainWindow::applyVelocityFromDirectWithDirection(int directionSign)
         return;
     }
 
-    const int magnitude = qAbs(velocityDirectSpin->value());
+    const int magnitude = qAbs(ui->velocityDirectSpin->value());
     const int requestedVelocity = (directionSign >= 0) ? magnitude : -magnitude;
-    const int minValue = velocityMinSpin->value();
-    const int maxValue = velocityMaxSpin->value();
+    const int minValue = ui->velocityMinSpin->value();
+    const int maxValue = ui->velocityMaxSpin->value();
     const int boundedVelocity = qBound(minValue, requestedVelocity, maxValue);
 
     syncingUi = true;
     {
-        QSignalBlocker b1(velocityDirectSpin);
-        QSignalBlocker b2(velocitySlider);
-        velocityDirectSpin->setValue(boundedVelocity);
-        velocitySlider->setValue(boundedVelocity);
-        velocityValueLabel->setText(QString("%1 %2").arg(boundedVelocity).arg(velocityUnitText()));
+        QSignalBlocker b1(ui->velocityDirectSpin);
+        QSignalBlocker b2(ui->velocitySlider);
+        ui->velocityDirectSpin->setValue(boundedVelocity);
+        ui->velocitySlider->setValue(boundedVelocity);
+        ui->velocityValueLabel->setText(QString("%1 %2").arg(boundedVelocity).arg(velocityUnitText()));
     }
     syncingUi = false;
 
@@ -953,17 +650,6 @@ void MainWindow::onWorkerCommandDone(const QString &action, bool ok)
     if (ok)
     {
         clearError();
-
-        if (action.startsWith(QStringLiteral("Velocity torque/flux limit")))
-        {
-            const int appliedLimitRaw = qBound(DEFAULT_VELOCITY_TORQUE_LIMIT_MIN,
-                                               pendingVelocityTorqueLimitRaw,
-                                               DEFAULT_VELOCITY_TORQUE_LIMIT_MAX);
-            if (velocityTorqueLimitAppliedLabel != nullptr)
-            {
-                velocityTorqueLimitAppliedLabel->setText(QString("%1 raw").arg(appliedLimitRaw));
-            }
-        }
     }
     else
     {
@@ -978,18 +664,24 @@ void MainWindow::onWorkerCommandDone(const QString &action, bool ok)
 
 void MainWindow::onWorkerStallStateChanged(bool stalled, const QString &message)
 {
-    setFeedbackValue("stall_status", message);
-
     if (stalled)
     {
-        setStatusText("STALL DETECTED", false);
-        showError(message);
+        if (message.contains(QStringLiteral("END STOP"), Qt::CaseInsensitive) ||
+            message.contains(QStringLiteral("MECHANICAL END"), Qt::CaseInsensitive) ||
+            message.contains(QStringLiteral("POSITION_LIMIT"), Qt::CaseInsensitive))
+        {
+            // Mechanical end stop at 0/90 degree is an expected stop, not a fault.
+            setStatusText("END FOUND", true);
+            clearError();
+        }
+        else
+        {
+            setStatusText("STALL DETECTED", false);
+            showError(message);
+        }
         return;
     }
 
-    // A new command or a successful command must clear the old latched
-    // red "STALL DETECTED" status. Previously only the small Stall field
-    // changed to "Monitoring", while the main Status badge stayed red.
     clearError();
 
     if (message.startsWith(QStringLiteral("Monitoring"), Qt::CaseInsensitive) ||
@@ -1046,9 +738,9 @@ void MainWindow::appendLog(const QString &message)
     const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
     const QString line = QString("[%1] %2").arg(timestamp, message);
 
-    if (logText != nullptr)
+    if (ui->logText != nullptr)
     {
-        logText->append(line.toHtmlEscaped());
+        ui->logText->append(line.toHtmlEscaped());
     }
 
     if (logFile.isOpen())
@@ -1074,20 +766,20 @@ void MainWindow::showError(const QString &message)
         return;
     }
 
-    errorDotLabel->setObjectName("dotRed");
-    errorDotLabel->style()->unpolish(errorDotLabel);
-    errorDotLabel->style()->polish(errorDotLabel);
+    ui->errorDotLabel->setObjectName("dotRed");
+    ui->errorDotLabel->style()->unpolish(ui->errorDotLabel);
+    ui->errorDotLabel->style()->polish(ui->errorDotLabel);
 
-    errorTextLabel->setText(message);
+    ui->errorTextLabel->setText(message);
     appendLog(QString("ERROR: %1").arg(message));
 }
 
 void MainWindow::clearError()
 {
-    errorDotLabel->setObjectName("dotGreen");
-    errorDotLabel->style()->unpolish(errorDotLabel);
-    errorDotLabel->style()->polish(errorDotLabel);
-    errorTextLabel->setText("No error");
+    ui->errorDotLabel->setObjectName("dotGreen");
+    ui->errorDotLabel->style()->unpolish(ui->errorDotLabel);
+    ui->errorDotLabel->style()->polish(ui->errorDotLabel);
+    ui->errorTextLabel->setText("No error");
 }
 
 void MainWindow::updateRange(QSpinBox *minSpin,
@@ -1129,13 +821,17 @@ void MainWindow::setConnectedUi(bool connected)
     connectedToController = connected;
     statusRequestPending = false;
 
-    connectButton->setEnabled(true);
-    applyTorqueButton->setEnabled(connected);
-    applyVelocityButton->setEnabled(connected);
-    velocityCwButton->setEnabled(connected);
-    velocityCcwButton->setEnabled(connected);
-    applyVelocityTorqueLimitButton->setEnabled(connected);
-    estopButton->setEnabled(connected);
+    ui->connectButton->setEnabled(true);
+    ui->applyTorqueButton->setEnabled(connected);
+    ui->applyVelocityButton->setEnabled(connected);
+    ui->velocityCwButton->setEnabled(connected);
+    ui->velocityCcwButton->setEnabled(connected);
+    ui->applyVelocityTorqueLimitButton->setEnabled(connected);
+    if (ui->readRunStatusButton != nullptr)
+    {
+        ui->readRunStatusButton->setEnabled(connected);
+    }
+    ui->estopButton->setEnabled(connected);
 
     if (connected)
     {
@@ -1145,7 +841,7 @@ void MainWindow::setConnectedUi(bool connected)
 
     statusTimer.stop();
     setStatusText("Disconnected", false);
-    chipIdValueLabel->setText("----");
+    ui->chipIdValueLabel->setText("----");
 
     const QStringList keys = feedbackLabels.keys();
     for (const QString &key : keys)
@@ -1162,8 +858,8 @@ void MainWindow::setConnectedUi(bool connected)
 
 void MainWindow::setStatusText(const QString &text, bool ok)
 {
-    statusValueLabel->setText(QString("●  %1").arg(text));
-    statusValueLabel->setObjectName(ok ? "statusGood" : "statusBad");
-    statusValueLabel->style()->unpolish(statusValueLabel);
-    statusValueLabel->style()->polish(statusValueLabel);
+    ui->statusValueLabel->setText(QString("●  %1").arg(text));
+    ui->statusValueLabel->setObjectName(ok ? "statusGood" : "statusBad");
+    ui->statusValueLabel->style()->unpolish(ui->statusValueLabel);
+    ui->statusValueLabel->style()->polish(ui->statusValueLabel);
 }

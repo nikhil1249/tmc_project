@@ -193,38 +193,113 @@ bool Tmc6460QtInterface::readRunStatus(RunStatus *status)
     }
 
     RunStatus result;
-    bool ok = true;
 
-    // Minimal live feedback read. Keep this short because status polling runs periodically.
-    // Velocity actual comes directly from the official Trinamic address TMC6460_FOC_PID_VELOCITY_ACTUAL [0x0154].
-    ok &= readRegister(REG_CHIP_STATUS_FLAGS, &result.chipStatusFlags);
-
-    quint32 velocityActualReg = 0;
-    if (readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &velocityActualReg))
+    if (!isOpen())
     {
-        result.velocityActualRaw = static_cast<qint32>(velocityActualReg);
-
-        // Temporary debug print requested for tuning. Status polling is 1 second,
-        // so this prints PID velocity actual once per second.
-        qDebug().noquote() << QString("DEBUG PID_VELOCITY_ACTUAL [0x0154] = %1, raw=%2")
-                                  .arg(hex32(velocityActualReg))
-                                  .arg(result.velocityActualRaw);
-    }
-    else
-    {
-        ok = false;
+        result.errorText = QStringLiteral("Serial port is not open");
+        *status = result;
+        setError(result.errorText);
+        return false;
     }
 
-    ok &= readRegister(REG_FOC_PID_POSITION_ACTUAL, &result.positionActual);
-    ok &= readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &result.torqueFluxActual);
+    quint32 value = 0;
 
-    result.fluxActualRaw = lowSigned16(result.torqueFluxActual);
-    result.torqueActualRaw = highSigned16(result.torqueFluxActual);
+    if (!readRegister(REG_CHIP_STATUS_FLAGS, &value))
+    {
+        result.errorText = QStringLiteral("Read CHIP_STATUS_FLAGS failed");
+        *status = result;
+        return false;
+    }
+    result.chipStatusFlags = value;
+
+    if (!readRegister(REG_CHIP_EVENTS, &value))
+    {
+        result.errorText = QStringLiteral("Read CHIP_EVENTS failed");
+        *status = result;
+        return false;
+    }
+    result.chipEvents = value;
+
+    if (!readRegister(REG_MCC_CONFIG_MOTOR_MOTION, &value))
+    {
+        result.errorText = QStringLiteral("Read MCC_CONFIG_MOTOR_MOTION failed");
+        *status = result;
+        return false;
+    }
+    result.motorMotion = value;
+
+    if (!readRegister(REG_MCC_CONFIG_GDRV, &value))
+    {
+        result.errorText = QStringLiteral("Read MCC_CONFIG_GDRV failed");
+        *status = result;
+        return false;
+    }
+    result.gdrv = value;
+
+    if (!readRegister(REG_FOC_PID_VELOCITY_TARGET, &value))
+    {
+        result.errorText = QStringLiteral("Read VELOCITY_TARGET failed");
+        *status = result;
+        return false;
+    }
+    result.rawVelocityTarget = value;
+    result.velocityTargetRaw = static_cast<qint32>(value);
+
+    if (!readRegister(REG_FOC_PID_VELOCITY_ACTUAL, &value))
+    {
+        result.errorText = QStringLiteral("Read VELOCITY_ACTUAL failed");
+        *status = result;
+        return false;
+    }
+    result.rawVelocityActual = value;
+    result.velocityActualRaw = static_cast<qint32>(value);
+
+    if (!readRegister(REG_FOC_PID_POSITION_ACTUAL, &value))
+    {
+        result.errorText = QStringLiteral("Read POSITION_ACTUAL failed");
+        *status = result;
+        return false;
+    }
+    result.positionActual = value;
+    result.positionActualSigned = static_cast<qint32>(value);
+
+    if (!readRegister(REG_FOC_PID_TORQUE_FLUX_TARGET, &value))
+    {
+        result.errorText = QStringLiteral("Read TORQUE_FLUX_TARGET failed");
+        *status = result;
+        return false;
+    }
+    result.rawTorqueFluxTarget = value;
+    result.fluxTargetRaw = lowSigned16(value);
+    result.torqueTargetRaw = highSigned16(value);
+
+    if (!readRegister(REG_FOC_PID_TORQUE_FLUX_ACTUAL, &value))
+    {
+        result.errorText = QStringLiteral("Read TORQUE_FLUX_ACTUAL failed");
+        *status = result;
+        return false;
+    }
+    result.torqueFluxActual = value;
+    result.fluxActualRaw = lowSigned16(value);
+    result.torqueActualRaw = highSigned16(value);
     result.torqueCurrentMilliAmp = torqueRawToMilliAmp(result.torqueActualRaw);
 
-    result.valid = ok;
+    // Phase ADC values are useful while tuning current/torque limits.
+    // They are allowed to fail without invalidating the whole run-status snapshot.
+    if (readRegister(REG_MCC_ADC_IW_IU, &value))
+    {
+        result.phaseCurrentUraw = value & 0xFFFFUL;
+        result.phaseCurrentWraw = (value >> 16) & 0xFFFFUL;
+    }
+
+    if (readRegister(REG_MCC_ADC_IV, &value))
+    {
+        result.phaseCurrentVraw = value & 0xFFFFUL;
+    }
+
+    result.valid = true;
     *status = result;
-    return ok;
+    return true;
 }
 
 bool Tmc6460QtInterface::setVelocityTarget(qint32 targetVelocity)
@@ -237,13 +312,15 @@ bool Tmc6460QtInterface::setVelocityTarget(qint32 targetVelocity)
 
     bool ok = false;
 
-    // Important: velocity 0 must not remain in velocity loop.
-    // On this actuator it can decay slowly and then vibrate. Use the same
-    // Python/TMCL idle sequence that was stable during testing.
+    // Loaded-actuator safety:
+    // Velocity 0 means active safe hold, not idle/freewheel.
+    // Do not call applyIdleStopSequence() here because that path can remove
+    // active holding torque. Keep velocity mode active, keep GDRV enabled,
+    // keep torque/flux limit non-zero, and command VELOCITY_TARGET = 0.
     if (targetVelocity == 0)
     {
-        ok = applyIdleStopSequence("VELOCITY_ZERO_STOP");
-        log("ACTION: Velocity target raw=0 applied using idle stop sequence");
+        ok = safeLoadStopHold(currentVelocityTorqueFluxLimitRaw);
+        log("ACTION: Velocity target raw=0 applied using SAFE_LOAD_STOP_HOLD");
         setBusy(false);
         return ok;
     }
@@ -293,6 +370,7 @@ bool Tmc6460QtInterface::prepareVelocityModeForRun()
         estopActive = false;
         velocityModePrepared = false;
         torqueModePrepared = false;
+        positionModePrepared = false;
     }
 
     if (!velocityModePrepared)
@@ -311,6 +389,7 @@ bool Tmc6460QtInterface::prepareVelocityModeForRun()
 
         velocityModePrepared = true;
         torqueModePrepared = false;
+        positionModePrepared = false;
         log(QString("MODE: Velocity, MCC_CONFIG_MOTOR_MOTION=%1")
                 .arg(hex32(MOTOR_MOTION_VELOCITY_VALUE)));
     }
@@ -343,6 +422,7 @@ bool Tmc6460QtInterface::prepareTorqueModeForRun()
         estopActive = false;
         velocityModePrepared = false;
         torqueModePrepared = false;
+        positionModePrepared = false;
     }
 
     if (!torqueModePrepared)
@@ -360,9 +440,85 @@ bool Tmc6460QtInterface::prepareTorqueModeForRun()
 
         torqueModePrepared = true;
         velocityModePrepared = false;
+        positionModePrepared = false;
         lastVelocityCommand = 0;
         log(QString("MODE: Torque, MCC_CONFIG_MOTOR_MOTION=%1")
                 .arg(hex32(MOTOR_MOTION_TORQUE_VALUE)));
+    }
+
+    return true;
+}
+
+
+bool Tmc6460QtInterface::preparePositionModeForRun()
+{
+    if (estopActive || !driverEnabled)
+    {
+        if (!setDriverEnable(false))
+        {
+            return false;
+        }
+
+        QThread::msleep(DRIVER_TOGGLE_DELAY_MS);
+
+        if (!setDriverEnable(true))
+        {
+            return false;
+        }
+
+        if (!waitForChipEvent(DRIVER_READY_EVENT_MASK, DRIVER_READY_TIMEOUT_MS))
+        {
+            log("WARNING: GDRV_ON_EVENT not seen after driver enable");
+        }
+
+        QThread::msleep(30);
+        estopActive = false;
+        velocityModePrepared = false;
+        torqueModePrepared = false;
+        positionModePrepared = false;
+    }
+
+    if (!positionModePrepared)
+    {
+        // Basic position-loop setup. Velocity limit and torque/flux limit are already
+        // controlled from the GUI. Position P/I can be tuned later after this test.
+        // POSITION_COEFF: upper 16 bits = P, lower 16 bits = I.
+        writeRegisterChecked(REG_FOC_PID_POSITION_COEFF,
+                             0x00500000UL,
+                             "FOC_PID_POSITION_COEFF POSITION_TEST",
+                             false);
+        writeRegisterChecked(REG_FOC_PID_POSITION_TOLERANCE,
+                             0x00001000UL,
+                             "FOC_PID_POSITION_TOLERANCE POSITION_TEST",
+                             false);
+        writeRegisterChecked(REG_FOC_PID_POSITION_TOLERANCE_DELAY,
+                             0x00000008UL,
+                             "FOC_PID_POSITION_TOLERANCE_DELAY POSITION_TEST",
+                             false);
+
+        if (!writeRegisterChecked(REG_FOC_PID_VELOCITY_LIMIT,
+                                  static_cast<quint32>(currentVelocityLimitRaw),
+                                  "FOC_PID_VELOCITY_LIMIT POSITION_RUN",
+                                  false))
+        {
+            return false;
+        }
+
+        if (!writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
+                                  MOTOR_MOTION_POSITION_VALUE,
+                                  "MCC_CONFIG_MOTOR_MOTION POSITION",
+                                  false))
+        {
+            return false;
+        }
+
+        positionModePrepared = true;
+        velocityModePrepared = false;
+        torqueModePrepared = false;
+        lastVelocityCommand = 0;
+        log(QString("MODE: Position, MCC_CONFIG_MOTOR_MOTION=%1, velocityLimit=%2")
+                .arg(hex32(MOTOR_MOTION_POSITION_VALUE))
+                .arg(currentVelocityLimitRaw));
     }
 
     return true;
@@ -576,10 +732,158 @@ bool Tmc6460QtInterface::setVelocityTorqueFluxLimit(qint32 torqueLimitRaw)
 
     if (ok)
     {
+        currentVelocityTorqueFluxLimitRaw = limitedTorque;
         log(QString("ACTION: Velocity-mode torque/flux limit: torque limit=%1, flux limit=%2, register=%3")
                 .arg(limitedTorque)
                 .arg(limitedTorque)
                 .arg(hex32(limitRegisterValue)));
+    }
+
+    setBusy(false);
+    return ok;
+}
+
+
+bool Tmc6460QtInterface::setPositionTarget(qint32 targetPosition)
+{
+    setBusy(true);
+
+    const bool ok = preparePositionModeForRun() &&
+                    writeRegisterChecked(REG_FOC_PID_POSITION_TARGET,
+                                         static_cast<quint32>(targetPosition),
+                                         "FOC_PID_POSITION_TARGET",
+                                         false);
+
+    if (ok)
+    {
+        log(QString("ACTION: Position target=%1, register=%2")
+                .arg(targetPosition)
+                .arg(hex32(static_cast<quint32>(targetPosition))));
+        debugReadRunRegistersOnce();
+    }
+
+    setBusy(false);
+    return ok;
+}
+
+bool Tmc6460QtInterface::setPositionTargetRelative(qint32 deltaCounts)
+{
+    RunStatus s;
+    if (!readRunStatus(&s))
+    {
+        log(QString("ERROR: Cannot read current position for relative position move: %1")
+                .arg(s.errorText));
+        return false;
+    }
+
+    const qint32 target = static_cast<qint32>(s.positionActual + static_cast<quint32>(deltaCounts));
+    log(QString("ACTION: Relative position move current=%1 (%2), delta=%3, target=%4")
+            .arg(hex32(s.positionActual))
+            .arg(s.positionActualSigned)
+            .arg(deltaCounts)
+            .arg(hex32(static_cast<quint32>(target))));
+
+    return setPositionTarget(target);
+}
+
+bool Tmc6460QtInterface::holdPositionAtActual(const char *reason)
+{
+    setBusy(true);
+
+    RunStatus s;
+    bool ok = readRunStatus(&s);
+    if (ok)
+    {
+        // Keep position loop active and command the currently measured position.
+        // This gives a controlled hold with torque/flux limited by the GUI limit register.
+        ok = preparePositionModeForRun() &&
+             writeRegisterChecked(REG_FOC_PID_POSITION_TARGET,
+                                  s.positionActual,
+                                  "FOC_PID_POSITION_TARGET HOLD_ACTUAL",
+                                  false) &&
+             writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
+                                  0x00000000UL,
+                                  "FOC_PID_VELOCITY_TARGET ZERO_FOR_POSITION_HOLD",
+                                  false);
+    }
+
+    if (ok)
+    {
+        log(QString("HOLD: %1 position hold applied at POS=%2")
+                .arg(QString::fromLatin1(reason))
+                .arg(hex32(s.positionActual)));
+    }
+    else
+    {
+        log(QString("ERROR: %1 position hold failed").arg(QString::fromLatin1(reason)));
+    }
+
+    setBusy(false);
+    return ok;
+}
+
+bool Tmc6460QtInterface::holdVelocityZeroAtActualEnd(const char *reason)
+{
+    setBusy(true);
+
+    RunStatus s;
+    const bool statusOk = readRunStatus(&s);
+    if (statusOk)
+    {
+        log(QString("HOLD_CAPTURE: %1 detected position POS=%2 (%3), velActual=%4, torque=%5, flux=%6")
+                .arg(QString::fromLatin1(reason))
+                .arg(hex32(s.positionActual))
+                .arg(s.positionActualSigned)
+                .arg(s.velocityActualRaw)
+                .arg(s.torqueActualRaw)
+                .arg(s.fluxActualRaw));
+    }
+    else
+    {
+        log(QString("WARNING: %1 could not read position before velocity-zero hold: %2")
+                .arg(QString::fromLatin1(reason))
+                .arg(s.errorText));
+    }
+
+    bool ok = true;
+
+    if (!driverEnabled)
+    {
+        ok &= setDriverEnable(true);
+        QThread::msleep(30);
+    }
+
+    /*
+     * Velocity-mode hold method:
+     * Do not use FOC_PID_POSITION_TARGET.
+     * Keep the FOC velocity loop active and command zero velocity.
+     * The available holding force is limited by FOC_PID_TORQUE_FLUX_LIMITS,
+     * which is set from the Velocity Torque/Flux Limit GUI field.
+     *
+     * This is not a true position servo. It is a zero-speed hold.
+     * It is the best method when position target must not be used.
+     */
+    ok &= prepareVelocityModeForRun();
+    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
+                               0x00000000UL,
+                               "FOC_PID_VELOCITY_TARGET ZERO_VELOCITY_HOLD",
+                               false);
+
+    lastVelocityCommand = 0;
+
+    if (ok)
+    {
+        velocityModePrepared = true;
+        torqueModePrepared = false;
+        positionModePrepared = false;
+
+        log(QString("HOLD: %1 velocity-zero hold applied, no position target used")
+                .arg(QString::fromLatin1(reason)));
+    }
+    else
+    {
+        log(QString("ERROR: %1 velocity-zero hold failed")
+                .arg(QString::fromLatin1(reason)));
     }
 
     setBusy(false);
@@ -593,9 +897,17 @@ bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
     const qint16 torqueRaw = static_cast<qint16>(qBound<qint32>(-MAX_ALLOWED_TORQUE_RAW,
                                                                targetTorque,
                                                                MAX_ALLOWED_TORQUE_RAW));
-    const quint32 targetRegisterValue = makeTorqueFluxTarget(torqueRaw, 0);
+    if (torqueRaw == 0)
+    {
+        const bool ok = safeLoadStopHold(currentVelocityTorqueFluxLimitRaw);
+        log("ACTION: Torque target raw=0 redirected to SAFE_LOAD_STOP_HOLD");
+        setBusy(false);
+        return ok;
+    }
 
-    // Torque command uses only upper 16 bits. Lower 16 bits/flux is kept zero.
+    const quint32 targetRegisterValue = makeTorqueFluxTarget(torqueRaw, DEFAULT_VELOCITY_TORQUE_LIMIT_RAW);
+
+    // Keep flux target non-zero; zero-torque commands are redirected to safe hold above.
     const bool ok = prepareTorqueModeForRun() &&
                     writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
                                          targetRegisterValue,
@@ -625,104 +937,104 @@ bool Tmc6460QtInterface::holdAfterStall()
 
 bool Tmc6460QtInterface::applyIdleStopSequence(const char *reason)
 {
+    /*
+     * Loaded-actuator safety:
+     * The previous idle-stop sequence switched to torque/idle and wrote a zero
+     * torque/flux target. That is blocked in this build because it can remove
+     * holding torque and allow the load to back-drive the actuator.
+     * Any legacy caller is redirected to the same safe hold used by E-STOP.
+     */
+    log(QString("BLOCKED: applyIdleStopSequence(%1) redirected to SAFE_LOAD_STOP_HOLD")
+            .arg(QString::fromLatin1(reason)));
+
+    return safeLoadStopHold(currentVelocityTorqueFluxLimitRaw);
+}
+
+bool Tmc6460QtInterface::shutdownMotorSafe()
+{
+    /*
+     * Load-safe GUI close / shutdown.
+     * Do not disable the gate driver here. With a suspended load, disabling
+     * the driver removes holding torque and can back-drive/break the actuator.
+     *
+     * This leaves the controller in velocity mode with VELOCITY_TARGET = 0
+     * and a non-zero torque/flux limit so the load remains held while power
+     * is still available.
+     */
+    log("SHUTDOWN: GUI close requested. Applying load-safe zero-velocity hold; driver remains enabled.");
+    return safeLoadStopHold(currentVelocityTorqueFluxLimitRaw);
+}
+
+bool Tmc6460QtInterface::safeLoadStopHold(qint32 holdTorqueFluxLimitRaw)
+{
+    setBusy(true);
+
+    /*
+     * SAFE LOAD STOP / E-STOP HOLD
+     *
+     * For a loaded actuator, never disable GDRV here. Disabling the driver or
+     * switching to PWM_ON/IDLE removes holding torque and allows the load to
+     * back-drive the gearbox.
+     *
+     * This function keeps the gate driver enabled, keeps velocity mode active,
+     * refreshes the torque/flux limit, and commands zero velocity.
+     */
+    qint32 requestedLimit = qAbs(holdTorqueFluxLimitRaw);
+
+    if (requestedLimit <= 0)
+        requestedLimit = qAbs(currentVelocityTorqueFluxLimitRaw);
+
+    if (requestedLimit <= 0)
+        requestedLimit = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
+
+    requestedLimit = qBound<qint32>(MIN_VELOCITY_TORQUE_LIMIT_RAW,
+                                    requestedLimit,
+                                    MAX_VELOCITY_TORQUE_LIMIT_RAW);
+
+    const qint16 limitRaw = static_cast<qint16>(requestedLimit);
+    const quint32 limitRegisterValue = makeTorqueFluxLimit(limitRaw, limitRaw);
+
     bool ok = true;
 
-    // Keep gate driver enabled for a controlled stop unless it was already off.
+    log(QString("SAFE_ESTOP_HOLD: keeping driver enabled, velocity zero hold, torque/flux limit=%1")
+            .arg(limitRaw));
+
     if (!driverEnabled)
     {
         ok &= setDriverEnable(true);
         QThread::msleep(30);
     }
 
-    // 1) Remove velocity demand first.
-    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
-                               0x00000000UL,
-                               "FOC_PID_VELOCITY_TARGET ZERO_STOP",
-                               false);
-
-    // 2) Switch to torque mode.
-    ok &= writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
-                               MOTOR_MOTION_TORQUE_VALUE,
-                               "MCC_CONFIG_MOTOR_MOTION TORQUE_STOP",
-                               false);
-
-    // 3) Set torque and flux target to zero.
-    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
-                               0x00000000UL,
-                               "FOC_PID_TORQUE_FLUX_TARGET ZERO_STOP",
-                               false);
-
-    QThread::msleep(500);
-
-    // 4) Put controller into the known Python/TMCL idle/PWM_ON state.
-    ok &= writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
-                               MOTOR_MOTION_IDLE_VALUE,
-                               "MCC_CONFIG_MOTOR_MOTION PWM_ON_IDLE_STOP",
-                               false);
-
-    QThread::msleep(500);
-
-    lastVelocityCommand = 0;
-    velocityModePrepared = false;
-    torqueModePrepared = false;
-    estopActive = false;
-
-    log(QString("STOP: %1 sequence applied: VELOCITY_TARGET=0 -> TORQUE -> TORQUE_FLUX_TARGET=0 -> PWM_ON/IDLE")
-            .arg(QString::fromLatin1(reason)));
-
-    return ok;
-}
-
-
-bool Tmc6460QtInterface::shutdownMotorSafe()
-{
-    setBusy(true);
-
-    log("SHUTDOWN: Safe motor shutdown started");
-
-    bool ok = true;
-
-    // Stop all active command targets first.
-    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
-                               0x00000000UL,
-                               "FOC_PID_VELOCITY_TARGET ZERO",
-                               false);
-
-    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET,
-                               0x00000000UL,
-                               "FOC_PID_TORQUE_FLUX_TARGET ZERO",
-                               false);
-
-    // Remove torque/flux limit so the controller cannot keep holding current
-    // after the GUI is closed. During next initialization this is restored to
-    // the Python/default value 0x0BB80BB8.
     ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_LIMITS,
-                               0x00000000UL,
-                               "FOC_PID_TORQUE_FLUX_LIMITS ZERO",
+                               limitRegisterValue,
+                               "FOC_PID_TORQUE_FLUX_LIMITS SAFE_ESTOP_HOLD",
                                false);
 
-    // Put motion controller back to the Python idle/PWM_ON state.
     ok &= writeRegisterChecked(REG_MCC_CONFIG_MOTOR_MOTION,
-                               MOTOR_MOTION_IDLE_VALUE,
-                               "MCC_CONFIG_MOTOR_MOTION IDLE",
+                               MOTOR_MOTION_VELOCITY_VALUE,
+                               "MCC_CONFIG_MOTOR_MOTION VELOCITY_SAFE_ESTOP_HOLD",
                                false);
 
-    QThread::msleep(100);
-
-    // Finally disable the gate driver.
-    ok &= writeRegisterChecked(REG_MCC_CONFIG_GDRV,
-                               GDRV_OFF_VALUE,
-                               "MCC_CONFIG_GDRV OFF",
+    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET,
+                               0x00000000UL,
+                               "FOC_PID_VELOCITY_TARGET SAFE_ESTOP_HOLD",
                                false);
 
-    lastVelocityCommand = 0;
-    velocityModePrepared = false;
-    torqueModePrepared = false;
-    driverEnabled = false;
-    estopActive = true;
-
-    log(ok ? "SHUTDOWN: Safe motor shutdown completed"
-           : "SHUTDOWN: Safe motor shutdown completed with errors");
+    if (ok)
+    {
+        lastVelocityCommand = 0;
+        currentVelocityTorqueFluxLimitRaw = limitRaw;
+        velocityModePrepared = true;
+        torqueModePrepared = false;
+        positionModePrepared = false;
+        estopActive = false;
+        driverEnabled = true;
+        log("SAFE_ESTOP_HOLD: applied. Load is held by zero-speed velocity loop. Do not power off until load is mechanically safe.");
+    }
+    else
+    {
+        log("ERROR: SAFE_ESTOP_HOLD failed. Mechanically support the load before disabling power.");
+    }
 
     setBusy(false);
     return ok;
@@ -730,21 +1042,33 @@ bool Tmc6460QtInterface::shutdownMotorSafe()
 
 bool Tmc6460QtInterface::emergencyStop()
 {
+    /*
+     * IMPORTANT: GUI E-Stop is now load-safe.
+     * It intentionally does NOT disable the gate driver.
+     */
+    return safeLoadStopHold(currentVelocityTorqueFluxLimitRaw);
+}
+
+bool Tmc6460QtInterface::hardDisableDriverForUnloadedTestOnly()
+{
     setBusy(true);
 
-    log("E-STOP command");
+    log("HARD_DISABLE_UNLOADED_ONLY: this removes holding torque. Use only when load is mechanically supported or removed.");
 
     bool ok = true;
-    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, 0, "FOC_PID_VELOCITY_TARGET STOP");
-    lastVelocityCommand = 0;
-    ok &= writeRegisterChecked(REG_FOC_PID_TORQUE_FLUX_TARGET, 0, "FOC_PID_TORQUE_FLUX_TARGET STOP");
-
-    // Keep the safety behavior: disable the gate driver.
-    // Next non-zero torque/velocity command will automatically re-arm it.
+    ok &= writeRegisterChecked(REG_FOC_PID_VELOCITY_TARGET, 0, "FOC_PID_VELOCITY_TARGET HARD_DISABLE", false);
+    QThread::msleep(50);
     ok &= setDriverEnable(false);
-    estopActive = true;
-    velocityModePrepared = false;
-    torqueModePrepared = false;
+
+    if (ok)
+    {
+        lastVelocityCommand = 0;
+        velocityModePrepared = false;
+        torqueModePrepared = false;
+        positionModePrepared = false;
+        driverEnabled = false;
+        estopActive = true;
+    }
 
     setBusy(false);
     return ok;
@@ -962,6 +1286,7 @@ bool Tmc6460QtInterface::setDriverEnable(bool enable)
         {
             velocityModePrepared = false;
             torqueModePrepared = false;
+            positionModePrepared = false;
         }
     }
     return ok;
@@ -1061,7 +1386,6 @@ QVector<Tmc6460QtInterface::RegisterValue> Tmc6460QtInterface::configurationTabl
         {REG_FEEDBACK_VELOCITY_PER_FILTER, 0x00000003UL, "FEEDBACK_VELOCITY_PER_FILTER"},
         {REG_FEEDBACK_OUTPUT_CONF,         0x00400001UL, "FEEDBACK_OUTPUT_CONF"},
         {REG_FOC_PID_VELOCITY_LIMIT,       0x00989680UL, "FOC_PID_VELOCITY_LIMIT"},
-        {REG_FOC_PID_TORQUE_FLUX_TARGET,   0x00000000UL, "FOC_PID_TORQUE_FLUX_TARGET"},
         {REG_FOC_PID_VELOCITY_TARGET,      0x00000000UL, "FOC_PID_VELOCITY_TARGET"},
         {REG_HALL_MAP_CONFIG,              0x00000001UL, "HALL_MAP_CONFIG"}
     };

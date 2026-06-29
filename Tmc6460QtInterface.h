@@ -25,22 +25,34 @@ public:
 
     struct RunStatus
     {
+        bool valid = false;
+
         quint32 chipStatusFlags = 0;
         quint32 chipEvents = 0;
         quint32 motorMotion = 0;
         quint32 gdrv = 0;
-        quint32 velocityTarget = 0;
-        quint32 torqueFluxTarget = 0;
-        qint32 velocityActualRaw = 0;
+
+        quint32 rawVelocityTarget = 0;
+        quint32 rawVelocityActual = 0;
         quint32 positionActual = 0;
+        quint32 rawTorqueFluxTarget = 0;
         quint32 torqueFluxActual = 0;
+
+        qint32 velocityTargetRaw = 0;
+        qint32 velocityActualRaw = 0;
+        qint32 positionActualSigned = 0;
+
+        qint16 torqueTargetRaw = 0;
+        qint16 fluxTargetRaw = 0;
+        qint16 torqueActualRaw = 0;
+        qint16 fluxActualRaw = 0;
+
         quint32 phaseCurrentUraw = 0;
         quint32 phaseCurrentVraw = 0;
         quint32 phaseCurrentWraw = 0;
-        qint16 torqueActualRaw = 0;
-        qint16 fluxActualRaw = 0;
+
         int torqueCurrentMilliAmp = 0;
-        bool valid = false;
+        QString errorText;
     };
 
     explicit Tmc6460QtInterface(QObject *parent = nullptr);
@@ -60,13 +72,20 @@ public:
     bool readRunStatus(RunStatus *status);
 
     bool setVelocityTarget(qint32 targetVelocity);
+    bool setPositionTarget(qint32 targetPosition);
+    bool setPositionTargetRelative(qint32 deltaCounts);
+    bool holdPositionAtActual(const char *reason);
+    bool holdVelocityZeroAtActualEnd(const char *reason);
     bool setVelocityLimitRaw(qint32 limitRaw);
     bool setTorqueTarget(qint32 targetTorque);
     bool setVelocityTorqueLimit(qint32 torqueLimitRaw);
     bool setVelocityTorqueFluxLimit(qint32 limitRaw);
     bool prepareVelocityModeForRun();
     bool prepareTorqueModeForRun();
+    bool preparePositionModeForRun();
     bool emergencyStop();
+    bool safeLoadStopHold(qint32 holdTorqueFluxLimitRaw);
+    bool hardDisableDriverForUnloadedTestOnly();
     bool shutdownMotorSafe();
     bool holdAfterStall();
     bool applyIdleStopSequence(const char *reason);
@@ -119,11 +138,15 @@ private:
     static constexpr quint16 REG_FOC_PID_FLUX_COEFF           = TMC6460_FOC_PID_FLUX_COEFF;
     static constexpr quint16 REG_FOC_PID_TORQUE_COEFF         = TMC6460_FOC_PID_TORQUE_COEFF;
     static constexpr quint16 REG_FOC_PID_VELOCITY_COEFF       = TMC6460_FOC_PID_VELOCITY_COEFF;
+    static constexpr quint16 REG_FOC_PID_POSITION_COEFF       = TMC6460_FOC_PID_POSITION_COEFF;
+    static constexpr quint16 REG_FOC_PID_POSITION_TOLERANCE   = TMC6460_FOC_PID_POSITION_TOLERANCE;
+    static constexpr quint16 REG_FOC_PID_POSITION_TOLERANCE_DELAY = TMC6460_FOC_PID_POSITION_TOLERANCE_DELAY;
     static constexpr quint16 REG_FOC_PID_UQ_UD_LIMITS         = TMC6460_FOC_PID_UQ_UD_LIMITS;
     static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_LIMITS   = TMC6460_FOC_PID_TORQUE_FLUX_LIMITS;
     static constexpr quint16 REG_FOC_PID_VELOCITY_LIMIT       = TMC6460_FOC_PID_VELOCITY_LIMIT;
     static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_TARGET   = TMC6460_FOC_PID_TORQUE_FLUX_TARGET;
     static constexpr quint16 REG_FOC_PID_VELOCITY_TARGET      = TMC6460_FOC_PID_VELOCITY_TARGET;
+    static constexpr quint16 REG_FOC_PID_POSITION_TARGET      = TMC6460_FOC_PID_POSITION_TARGET;
     static constexpr quint16 REG_FOC_PID_VELOCITY_ACTUAL      = TMC6460_FOC_PID_VELOCITY_ACTUAL;
     static constexpr quint16 REG_FOC_PID_POSITION_ACTUAL      = TMC6460_FOC_PID_POSITION_ACTUAL;
     static constexpr quint16 REG_FOC_PID_TORQUE_FLUX_ACTUAL   = TMC6460_FOC_PID_TORQUE_FLUX_ACTUAL;
@@ -144,14 +167,16 @@ private:
     static constexpr quint32 MOTOR_MOTION_IDLE_VALUE     = 0x00002386UL;
     static constexpr quint32 MOTOR_MOTION_VELOCITY_VALUE = 0x00002786UL;
     static constexpr quint32 MOTOR_MOTION_TORQUE_VALUE   = 0x00002586UL;
+    static constexpr quint32 MOTOR_MOTION_POSITION_VALUE = 0x00002986UL; // MOTION_MODE=4, same base config as working velocity mode
 
     // Python script limits. Keep GUI/software commands inside these limits.
     static constexpr qint32 PYTHON_CONST_VELOCITY_RAW = 4000000;
     static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW  = 10000000;
-    static constexpr qint32 MAX_ALLOWED_TORQUE_RAW    = 10000;
-    static constexpr qint32 MIN_VELOCITY_TORQUE_LIMIT_RAW = 0;
-    static constexpr qint32 MAX_VELOCITY_TORQUE_LIMIT_RAW = 10000;
-    static constexpr qint16 DEFAULT_FLUX_LIMIT_RAW = 1000;
+    static constexpr qint32 MAX_ALLOWED_TORQUE_RAW    = 3000;
+    static constexpr qint32 MIN_VELOCITY_TORQUE_LIMIT_RAW = 300;
+    static constexpr qint32 MAX_VELOCITY_TORQUE_LIMIT_RAW = 3000;
+    static constexpr qint32 DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 1000;
+    // static constexpr qint16 DEFAULT_FLUX_LIMIT_RAW = 1000;
 
     // GUI current conversion. TMC6460 FOC torque actual is a signed raw current-axis value.
     // Keep this as a project calibration constant because the exact mA/raw depends on
@@ -166,8 +191,10 @@ private:
     bool estopActive = false;
     bool velocityModePrepared = false;
     bool torqueModePrepared = false;
+    bool positionModePrepared = false;
     qint32 lastVelocityCommand = 0;
     qint32 currentVelocityLimitRaw = MAX_ALLOWED_VELOCITY_RAW;
+    qint32 currentVelocityTorqueFluxLimitRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
 
     void setBusy(bool busy);
     void setError(const QString &message);
@@ -188,7 +215,7 @@ private:
     bool writeVelocityTargetImmediate(qint32 targetVelocity, const char *name);
     bool applyVelocityWithSafeReverseRamp(qint32 targetVelocity);
     static int signOf(qint32 value);
-    static quint32 makeTorqueFluxTarget(qint16 torqueRaw, qint16 fluxRaw = 0);
+    static quint32 makeTorqueFluxTarget(qint16 torqueRaw, qint16 fluxRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW);
     static quint32 makeTorqueFluxLimit(qint16 torqueLimitRaw, qint16 fluxLimitRaw);
 
     static QString hex8(quint8 value);
