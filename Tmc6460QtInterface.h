@@ -9,6 +9,7 @@
 #include <QtGlobal>
 #include <cstdint>
 
+#include "ActuatorConfig.h"
 #include "TMC6460_HW_Abstraction.h"
 
 class Tmc6460QtInterface : public QObject
@@ -72,9 +73,11 @@ public:
     bool readRunStatus(RunStatus *status);
 
     bool setVelocityTarget(qint32 targetVelocity);
+#if TMC6460_ENABLE_POSITION_MODE
     bool setPositionTarget(qint32 targetPosition);
     bool setPositionTargetRelative(qint32 deltaCounts);
     bool holdPositionAtActual(const char *reason);
+#endif
     bool holdVelocityZeroAtActualEnd(const char *reason);
     bool setVelocityLimitRaw(qint32 limitRaw);
     bool setTorqueTarget(qint32 targetTorque);
@@ -82,7 +85,9 @@ public:
     bool setVelocityTorqueFluxLimit(qint32 limitRaw);
     bool prepareVelocityModeForRun();
     bool prepareTorqueModeForRun();
+#if TMC6460_ENABLE_POSITION_MODE
     bool preparePositionModeForRun();
+#endif
     bool emergencyStop();
     bool safeLoadStopHold(qint32 holdTorqueFluxLimitRaw);
     bool hardDisableDriverForUnloadedTestOnly();
@@ -173,10 +178,7 @@ private:
     static constexpr qint32 PYTHON_CONST_VELOCITY_RAW = 4000000;
     static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW  = 10000000;
     static constexpr qint32 MAX_ALLOWED_TORQUE_RAW    = 3000;
-    static constexpr qint32 MIN_VELOCITY_TORQUE_LIMIT_RAW = 300;
-    static constexpr qint32 MAX_VELOCITY_TORQUE_LIMIT_RAW = 3000;
-    static constexpr qint32 DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 1000;
-    // static constexpr qint16 DEFAULT_FLUX_LIMIT_RAW = 1000;
+    static constexpr qint16 DEFAULT_FLUX_LIMIT_RAW = 1000;
 
     // GUI current conversion. TMC6460 FOC torque actual is a signed raw current-axis value.
     // Keep this as a project calibration constant because the exact mA/raw depends on
@@ -215,7 +217,7 @@ private:
     bool writeVelocityTargetImmediate(qint32 targetVelocity, const char *name);
     bool applyVelocityWithSafeReverseRamp(qint32 targetVelocity);
     static int signOf(qint32 value);
-    static quint32 makeTorqueFluxTarget(qint16 torqueRaw, qint16 fluxRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW);
+    static quint32 makeTorqueFluxTarget(qint16 torqueRaw, qint16 fluxRaw = DEFAULT_FLUX_LIMIT_RAW);
     static quint32 makeTorqueFluxLimit(qint16 torqueLimitRaw, qint16 fluxLimitRaw);
 
     static QString hex8(quint8 value);

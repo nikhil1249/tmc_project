@@ -73,6 +73,14 @@ void MotorWorker::connectAndInitialize(const QString &portName, int baudRate)
     }
 
     emit connected(true, chipId, QStringLiteral("Connected and initialized"));
+
+#if TMC6460_ENABLE_AUTO_TORQUE_LEARN_ON_INIT
+    emit logMessage(QStringLiteral("AUTO_TORQUE_LEARN_ON_INIT: enabled, starting automatic end-to-end torque learn at raw velocity=%1")
+                    .arg(DEFAULT_AUTO_TORQUE_LEARN_VELOCITY_RAW));
+    QTimer::singleShot(200, this, [this]() {
+        startAutoEndToEndCalibration(DEFAULT_AUTO_TORQUE_LEARN_VELOCITY_RAW);
+    });
+#endif
 }
 
 void MotorWorker::readStatus()
@@ -109,6 +117,13 @@ void MotorWorker::readStatus()
 
 void MotorWorker::applyTorque(int value)
 {
+    Q_UNUSED(value)
+
+#if !TMC6460_ENABLE_TORQUE_MODE
+    emit logMessage(QStringLiteral("TORQUE_MODE_DISABLED: torque commands are disabled. This build uses velocity mode only."));
+    emit commandDone(QStringLiteral("Torque mode disabled"), false);
+    return;
+#else
     ensureInterface();
 
     resetVelocityRampState();
@@ -126,6 +141,7 @@ void MotorWorker::applyTorque(int value)
 
     const bool ok = tmc->isOpen() && tmc->setTorqueTarget(limitedTorque);
     emit commandDone(QStringLiteral("Torque target %1").arg(limitedTorque), ok);
+#endif
 }
 
 
@@ -164,7 +180,7 @@ void MotorWorker::applyVelocityTorqueLimitRaw(int torqueLimitRaw)
 {
     ensureInterface();
 
-    const int limitedTorqueLimit = qBound<int>(0, torqueLimitRaw, MAX_ALLOWED_TORQUE_RAW);
+    const int limitedTorqueLimit = qBound<int>(MIN_VELOCITY_TORQUE_LIMIT_RAW, torqueLimitRaw, MAX_ALLOWED_TORQUE_RAW);
 
     if (limitedTorqueLimit != torqueLimitRaw)
     {
@@ -423,7 +439,7 @@ void MotorWorker::emergencyStop()
     emit logMessage(QStringLiteral("SAFE_ESTOP: keeping driver enabled and applying zero-velocity hold. Do not power off until load is mechanically safe."));
 
     const bool ok = tmc->isOpen() &&
-                    tmc->safeLoadStopHold(TMC6460_SAFE_ESTOP_HOLD_TORQUE_FLUX_LIMIT_RAW);
+                    tmc->safeLoadStopHold(learnedHoldTorqueFluxLimitRaw);
 
     if (ok)
     {
@@ -541,6 +557,44 @@ qint64 MotorWorker::signedPositionDelta32(quint32 current, quint32 start)
 }
 
 
+
+qint16 MotorWorker::clampHoldTorqueLimit(qint32 raw) const
+{
+    return static_cast<qint16>(qBound<qint32>(MIN_VELOCITY_TORQUE_LIMIT_RAW,
+                                             qAbs(raw),
+                                             MAX_VELOCITY_TORQUE_LIMIT_RAW));
+}
+
+qint16 MotorWorker::estimateHoldTorqueLimitFromStatus(const Tmc6460QtInterface::RunStatus &status,
+                                                      qint16 movingMaxAbsRaw) const
+{
+    const qint32 measuredAbs = qMax<qint32>(qAbs(status.torqueActualRaw), qAbs(movingMaxAbsRaw));
+    return clampHoldTorqueLimit(measuredAbs + AUTO_TORQUE_HOLD_MARGIN_RAW);
+}
+
+void MotorWorker::updateAutoTorqueLearnDuringSample(const Tmc6460QtInterface::RunStatus &status)
+{
+#if TMC6460_ENABLE_AUTO_END_TO_END_CALIBRATION
+    if (!autoCalibrationActive)
+        return;
+
+    const qint16 torqueAbs = static_cast<qint16>(qAbs(status.torqueActualRaw));
+
+    if (autoCalibrationState == AutoCalibrationState::FirstLeg)
+    {
+        if (torqueAbs > autoFirstMaxMovingTorqueAbsRaw)
+            autoFirstMaxMovingTorqueAbsRaw = torqueAbs;
+    }
+    else if (autoCalibrationState == AutoCalibrationState::SecondLeg)
+    {
+        if (torqueAbs > autoSecondMaxMovingTorqueAbsRaw)
+            autoSecondMaxMovingTorqueAbsRaw = torqueAbs;
+    }
+#else
+    Q_UNUSED(status)
+#endif
+}
+
 void MotorWorker::resetAutoCalibrationState()
 {
     autoCalibrationActive = false;
@@ -554,6 +608,15 @@ void MotorWorker::resetAutoCalibrationState()
     autoCalibrationSecondEndPosition = 0;
     autoCalibrationFirstTravelCounts = 0;
     autoCalibrationSecondTravelCounts = 0;
+
+    autoFirstStartTorqueAbsRaw = 0;
+    autoSecondStartTorqueAbsRaw = 0;
+    autoFirstMaxMovingTorqueAbsRaw = 0;
+    autoSecondMaxMovingTorqueAbsRaw = 0;
+    autoFirstEndTorqueAbsRaw = 0;
+    autoSecondEndTorqueAbsRaw = 0;
+    autoFirstHoldTorqueRequiredRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
+    autoSecondHoldTorqueRequiredRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
 }
 
 void MotorWorker::startAutoEndToEndCalibration(qint32 firstVelocityRaw)
@@ -588,7 +651,7 @@ void MotorWorker::startAutoEndToEndCalibration(qint32 firstVelocityRaw)
     autoCalibrationFirstCommandDirection = (limitedFirstVelocity > 0) ? 1 : -1;
 
     emit stallStateChanged(false, QStringLiteral("AUTO CAL: running first end"));
-    emit logMessage(QStringLiteral("AUTO_CAL_BEGIN: firstCommand=%1, firstVelocityRaw=%2, secondVelocityRaw=%3, old stored counts ignored")
+    emit logMessage(QStringLiteral("AUTO_TORQUE_LEARN_BEGIN: firstCommand=%1, firstVelocityRaw=%2, secondVelocityRaw=%3, speedRaw=4000000, positionMode=DISABLED, torqueMode=DISABLED")
                     .arg(autoCalibrationFirstCommandDirection > 0 ? QStringLiteral("CW_POSITIVE") : QStringLiteral("CCW_NEGATIVE"))
                     .arg(autoCalibrationFirstVelocityRaw)
                     .arg(autoCalibrationSecondVelocityRaw));
@@ -597,7 +660,9 @@ void MotorWorker::startAutoEndToEndCalibration(qint32 firstVelocityRaw)
     if (tmc->readRunStatus(&before))
     {
         autoCalibrationFirstStartPosition = before.positionActual;
-        emit logMessage(QStringLiteral("AUTO_CAL_FIRST_START_SNAPSHOT: POS=%1 (%2), VEL_ACTUAL=%3, TORQUE=%4, FLUX=%5, STATUS=%6, EVENTS=%7")
+        autoFirstStartTorqueAbsRaw = static_cast<qint16>(qAbs(before.torqueActualRaw));
+        autoFirstMaxMovingTorqueAbsRaw = autoFirstStartTorqueAbsRaw;
+        emit logMessage(QStringLiteral("AUTO_TORQUE_FIRST_START_SNAPSHOT: phase=RELEASE_OR_DOWN_CANDIDATE, POS=%1 (%2), VEL_ACTUAL=%3, TORQUE=%4, FLUX=%5, STATUS=%6, EVENTS=%7")
                         .arg(hex32(before.positionActual))
                         .arg(before.positionActualSigned)
                         .arg(before.velocityActualRaw)
@@ -652,7 +717,9 @@ void MotorWorker::startAutoSecondLeg()
     if (tmc->readRunStatus(&before))
     {
         autoCalibrationSecondStartPosition = before.positionActual;
-        emit logMessage(QStringLiteral("AUTO_CAL_SECOND_START_SNAPSHOT: POS=%1 (%2), VEL_ACTUAL=%3, TORQUE=%4, FLUX=%5, STATUS=%6, EVENTS=%7")
+        autoSecondStartTorqueAbsRaw = static_cast<qint16>(qAbs(before.torqueActualRaw));
+        autoSecondMaxMovingTorqueAbsRaw = autoSecondStartTorqueAbsRaw;
+        emit logMessage(QStringLiteral("AUTO_TORQUE_SECOND_START_SNAPSHOT: phase=LIFT_OR_RETURN_CANDIDATE, POS=%1 (%2), VEL_ACTUAL=%3, TORQUE=%4, FLUX=%5, STATUS=%6, EVENTS=%7")
                         .arg(hex32(before.positionActual))
                         .arg(before.positionActualSigned)
                         .arg(before.velocityActualRaw)
@@ -683,7 +750,16 @@ void MotorWorker::finishAutoEndToEndCalibration()
     const qint64 endToEndCountsFromEndPositions = qAbs(signedPositionDelta32(autoCalibrationSecondEndPosition,
                                                                              autoCalibrationFirstEndPosition));
 
-    emit logMessage(QStringLiteral("AUTO_CAL_COMPLETE: firstCommand=%1, firstStart=%2, firstEnd=%3, secondStart=%4, secondEnd=%5, firstTravel=%6, secondTravel=%7, endToEndCounts=%8")
+    learnedHoldTorqueFluxLimitRaw = clampHoldTorqueLimit(qMax<qint32>(autoFirstHoldTorqueRequiredRaw,
+                                                                          autoSecondHoldTorqueRequiredRaw));
+
+    if (tmc != nullptr && tmc->isOpen())
+    {
+        tmc->setVelocityTorqueFluxLimit(learnedHoldTorqueFluxLimitRaw);
+        tmc->safeLoadStopHold(learnedHoldTorqueFluxLimitRaw);
+    }
+
+    emit logMessage(QStringLiteral("AUTO_TORQUE_LEARN_COMPLETE: firstCommand=%1, firstStart=%2, firstEnd=%3, secondStart=%4, secondEnd=%5, firstTravel=%6, secondTravel=%7, endToEndCounts=%8")
                     .arg(autoCalibrationFirstCommandDirection > 0 ? QStringLiteral("CW_POSITIVE") : QStringLiteral("CCW_NEGATIVE"))
                     .arg(hex32(autoCalibrationFirstStartPosition))
                     .arg(hex32(autoCalibrationFirstEndPosition))
@@ -700,6 +776,12 @@ void MotorWorker::finishAutoEndToEndCalibration()
                     .arg(autoCalibrationFirstTravelCounts)
                     .arg(autoCalibrationSecondTravelCounts));
 
+    emit logMessage(QStringLiteral("AUTO_TORQUE_LEARN_VALUES: releaseOrFirstHold=%1, liftOrSecondHold=%2, learnedHoldTorqueFluxLimit=%3, margin=%4")
+                    .arg(autoFirstHoldTorqueRequiredRaw)
+                    .arg(autoSecondHoldTorqueRequiredRaw)
+                    .arg(learnedHoldTorqueFluxLimitRaw)
+                    .arg(AUTO_TORQUE_HOLD_MARGIN_RAW));
+
     emit stallStateChanged(true, QStringLiteral("AUTO CAL COMPLETE"));
     resetAutoCalibrationState();
 #endif
@@ -712,6 +794,8 @@ void MotorWorker::checkCalibrationEndStop(const Tmc6460QtInterface::RunStatus &s
     {
         return;
     }
+
+    updateAutoTorqueLearnDuringSample(status);
 
     if (!calibrationStartPositionValid)
     {
@@ -928,6 +1012,19 @@ void MotorWorker::handleCalibrationEndStop(const QString &reason,
     const int endedCommandDirection = calibrationCommandDirection;
     const quint32 detectedEndPosition = status.positionActual;
 
+#if TMC6460_ENABLE_AUTO_END_TO_END_CALIBRATION
+    if (autoCalibrationActive && autoCalibrationState == AutoCalibrationState::FirstLeg)
+    {
+        autoFirstEndTorqueAbsRaw = static_cast<qint16>(qAbs(status.torqueActualRaw));
+        autoFirstHoldTorqueRequiredRaw = estimateHoldTorqueLimitFromStatus(status, autoFirstMaxMovingTorqueAbsRaw);
+    }
+    else if (autoCalibrationActive && autoCalibrationState == AutoCalibrationState::SecondLeg)
+    {
+        autoSecondEndTorqueAbsRaw = static_cast<qint16>(qAbs(status.torqueActualRaw));
+        autoSecondHoldTorqueRequiredRaw = estimateHoldTorqueLimitFromStatus(status, autoSecondMaxMovingTorqueAbsRaw);
+    }
+#endif
+
     resetFinalEndCreepState();
     holdingAtEnd = true;
     holdingDirection = (endedCommandDirection >= 0) ? 1 : -1;
@@ -962,9 +1059,9 @@ void MotorWorker::handleCalibrationEndStop(const QString &reason,
     if (tmc != nullptr && tmc->isOpen())
     {
 #if TMC6460_USE_VELOCITY_ZERO_HOLD_AFTER_END
-        ok = tmc->holdVelocityZeroAtActualEnd("VELOCITY_MODE_END_OR_STALL");
+        ok = tmc->safeLoadStopHold(learnedHoldTorqueFluxLimitRaw);
 #else
-        ok = tmc->holdPositionAtActual("OPTIONAL_POSITION_HOLD_END_OR_STALL");
+        ok = tmc->safeLoadStopHold(learnedHoldTorqueFluxLimitRaw);
 #endif
     }
 
@@ -995,6 +1092,29 @@ void MotorWorker::handleCalibrationEndStop(const QString &reason,
                             .arg(settled.fluxActualRaw)
                             .arg(hex32(settled.chipStatusFlags))
                             .arg(hex32(settled.chipEvents)));
+
+#if TMC6460_ENABLE_AUTO_END_TO_END_CALIBRATION
+            if (autoCalibrationActive && autoCalibrationState == AutoCalibrationState::FirstLeg)
+            {
+                autoFirstHoldTorqueRequiredRaw = estimateHoldTorqueLimitFromStatus(settled, autoFirstMaxMovingTorqueAbsRaw);
+                emit logMessage(QStringLiteral("AUTO_TORQUE_FIRST_HOLD_ESTIMATE: phase=RELEASE_OR_DOWN_CANDIDATE, startTorqueAbs=%1, maxMovingTorqueAbs=%2, endTorqueAbs=%3, settledTorqueAbs=%4, requiredHoldTorqueFluxLimit=%5")
+                                .arg(autoFirstStartTorqueAbsRaw)
+                                .arg(autoFirstMaxMovingTorqueAbsRaw)
+                                .arg(autoFirstEndTorqueAbsRaw)
+                                .arg(qAbs(settled.torqueActualRaw))
+                                .arg(autoFirstHoldTorqueRequiredRaw));
+            }
+            else if (autoCalibrationActive && autoCalibrationState == AutoCalibrationState::SecondLeg)
+            {
+                autoSecondHoldTorqueRequiredRaw = estimateHoldTorqueLimitFromStatus(settled, autoSecondMaxMovingTorqueAbsRaw);
+                emit logMessage(QStringLiteral("AUTO_TORQUE_SECOND_HOLD_ESTIMATE: phase=LIFT_OR_RETURN_CANDIDATE, startTorqueAbs=%1, maxMovingTorqueAbs=%2, endTorqueAbs=%3, settledTorqueAbs=%4, requiredHoldTorqueFluxLimit=%5")
+                                .arg(autoSecondStartTorqueAbsRaw)
+                                .arg(autoSecondMaxMovingTorqueAbsRaw)
+                                .arg(autoSecondEndTorqueAbsRaw)
+                                .arg(qAbs(settled.torqueActualRaw))
+                                .arg(autoSecondHoldTorqueRequiredRaw));
+            }
+#endif
         }
     }
 

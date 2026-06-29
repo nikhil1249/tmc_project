@@ -399,6 +399,10 @@ bool Tmc6460QtInterface::prepareVelocityModeForRun()
 
 bool Tmc6460QtInterface::prepareTorqueModeForRun()
 {
+#if !TMC6460_ENABLE_TORQUE_MODE
+    log("TORQUE_MODE_DISABLED: prepareTorqueModeForRun blocked. Velocity mode only build.");
+    return false;
+#else
     if (estopActive || !driverEnabled)
     {
         if (!setDriverEnable(false))
@@ -447,9 +451,11 @@ bool Tmc6460QtInterface::prepareTorqueModeForRun()
     }
 
     return true;
+#endif
 }
 
 
+#if TMC6460_ENABLE_POSITION_MODE
 bool Tmc6460QtInterface::preparePositionModeForRun()
 {
     if (estopActive || !driverEnabled)
@@ -523,6 +529,7 @@ bool Tmc6460QtInterface::preparePositionModeForRun()
 
     return true;
 }
+#endif
 
 bool Tmc6460QtInterface::writeVelocityTargetImmediate(qint32 targetVelocity, const char *name)
 {
@@ -744,6 +751,7 @@ bool Tmc6460QtInterface::setVelocityTorqueFluxLimit(qint32 torqueLimitRaw)
 }
 
 
+#if TMC6460_ENABLE_POSITION_MODE
 bool Tmc6460QtInterface::setPositionTarget(qint32 targetPosition)
 {
     setBusy(true);
@@ -822,6 +830,8 @@ bool Tmc6460QtInterface::holdPositionAtActual(const char *reason)
     return ok;
 }
 
+#endif
+
 bool Tmc6460QtInterface::holdVelocityZeroAtActualEnd(const char *reason)
 {
     setBusy(true);
@@ -892,6 +902,11 @@ bool Tmc6460QtInterface::holdVelocityZeroAtActualEnd(const char *reason)
 
 bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
 {
+#if !TMC6460_ENABLE_TORQUE_MODE
+    Q_UNUSED(targetTorque)
+    log("TORQUE_MODE_DISABLED: torque target command blocked. Velocity mode only build.");
+    return false;
+#else
     setBusy(true);
 
     const qint16 torqueRaw = static_cast<qint16>(qBound<qint32>(-MAX_ALLOWED_TORQUE_RAW,
@@ -905,7 +920,7 @@ bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
         return ok;
     }
 
-    const quint32 targetRegisterValue = makeTorqueFluxTarget(torqueRaw, DEFAULT_VELOCITY_TORQUE_LIMIT_RAW);
+    const quint32 targetRegisterValue = makeTorqueFluxTarget(torqueRaw, DEFAULT_FLUX_LIMIT_RAW);
 
     // Keep flux target non-zero; zero-torque commands are redirected to safe hold above.
     const bool ok = prepareTorqueModeForRun() &&
@@ -923,6 +938,7 @@ bool Tmc6460QtInterface::setTorqueTarget(qint32 targetTorque)
 
     setBusy(false);
     return ok;
+#endif
 }
 
 bool Tmc6460QtInterface::holdAfterStall()

@@ -1,6 +1,7 @@
 #ifndef MOTORWORKER_H
 #define MOTORWORKER_H
 
+#include "ActuatorConfig.h"
 #include "Tmc6460QtInterface.h"
 
 #include <QObject>
@@ -14,12 +15,6 @@
 #endif
 
 // Actuator end calibration / stop detection.
-// 1 = CW/CCW button automatically runs one end, stops, then reverses to the other end.
-// 0 = CW/CCW button behaves as normal single-direction run-to-end monitor.
-#ifndef TMC6460_ENABLE_AUTO_END_TO_END_CALIBRATION
-#define TMC6460_ENABLE_AUTO_END_TO_END_CALIBRATION 0
-#endif
-
 // 1 = mechanical-end detection is active while running. Keep enabled during calibration.
 #ifndef TMC6460_ENABLE_ACTUATOR_STOP_DETECTION
 #define TMC6460_ENABLE_ACTUATOR_STOP_DETECTION 1
@@ -28,15 +23,6 @@
 // 1 = every calibration sample is logged. Disable after tuning if logs become too large.
 #ifndef TMC6460_CALIBRATION_LOG_EVERY_SAMPLE
 #define TMC6460_CALIBRATION_LOG_EVERY_SAMPLE 1
-#endif
-
-/*
- * End/stall hold method.
- * 1 = velocity-mode zero-speed hold only. This does NOT write position target.
- * 0 = use position target at actual position after end/stall. Keep 1 for your current test.
- */
-#ifndef TMC6460_USE_VELOCITY_ZERO_HOLD_AFTER_END
-#define TMC6460_USE_VELOCITY_ZERO_HOLD_AFTER_END 1
 #endif
 
 /*
@@ -91,7 +77,7 @@ private:
     static constexpr int VELOCITY_RAMP_TIMER_MS = 50;
     static constexpr qint32 VELOCITY_RAMP_STEP_RAW = 100000;
     static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW = 10000000;
-    static constexpr qint32 MAX_ALLOWED_TORQUE_RAW = 3000;
+    static constexpr qint32 MAX_ALLOWED_TORQUE_RAW = MAX_VELOCITY_TORQUE_LIMIT_RAW;
 
     /*
      * Calibration/end-to-end stop detection.
@@ -226,6 +212,16 @@ private:
     qint64 autoCalibrationFirstTravelCounts = 0;
     qint64 autoCalibrationSecondTravelCounts = 0;
 
+    qint16 autoFirstStartTorqueAbsRaw = 0;
+    qint16 autoSecondStartTorqueAbsRaw = 0;
+    qint16 autoFirstMaxMovingTorqueAbsRaw = 0;
+    qint16 autoSecondMaxMovingTorqueAbsRaw = 0;
+    qint16 autoFirstEndTorqueAbsRaw = 0;
+    qint16 autoSecondEndTorqueAbsRaw = 0;
+    qint16 autoFirstHoldTorqueRequiredRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
+    qint16 autoSecondHoldTorqueRequiredRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
+    qint16 learnedHoldTorqueFluxLimitRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
+
     void ensureInterface();
     bool writeVelocityRaw(qint32 rawVelocity);
     void resetVelocityRampState();
@@ -234,6 +230,9 @@ private:
     void startAutoEndToEndCalibration(qint32 firstVelocityRaw);
     void startAutoSecondLeg();
     void finishAutoEndToEndCalibration();
+    void updateAutoTorqueLearnDuringSample(const Tmc6460QtInterface::RunStatus &status);
+    qint16 estimateHoldTorqueLimitFromStatus(const Tmc6460QtInterface::RunStatus &status, qint16 movingMaxAbsRaw) const;
+    qint16 clampHoldTorqueLimit(qint32 raw) const;
     void resetAutoCalibrationState();
     void checkCalibrationEndStop(const Tmc6460QtInterface::RunStatus &status);
     void handleCalibrationEndStop(const QString &reason,

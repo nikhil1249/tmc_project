@@ -17,7 +17,8 @@ SOURCES += \
 HEADERS += \
     MotorWorker.h \
     Tmc6460QtInterface.h \
-    mainwindow.h
+    mainwindow.h \
+    ActuatorConfig.h
 
 FORMS += \
     mainwindow.ui

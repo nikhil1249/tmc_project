@@ -1,6 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "ActuatorConfig.h"
 #include "Tmc6460QtInterface.h"
 
 #include <QFile>
@@ -89,9 +90,8 @@ private:
     static constexpr int DEFAULT_VELOCITY_RAW = 4000000;
     static constexpr int DEFAULT_TORQUEMIN_VALUE = -3000;
     static constexpr int DEFAULT_TORQUEMAX_VALUE = 3000;
-    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MIN = 0;
-    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MAX = 3000;
-    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_RAW = 1000;
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MIN = MIN_VELOCITY_TORQUE_LIMIT_RAW;
+    static constexpr int DEFAULT_VELOCITY_TORQUE_LIMIT_MAX = MAX_VELOCITY_TORQUE_LIMIT_RAW;
 
     Ui::MainWindow *ui = nullptr;
 
