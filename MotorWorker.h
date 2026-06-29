@@ -50,6 +50,7 @@ public slots:
     void applyVelocityTorqueLimitRaw(int torqueLimitRaw);
     void applyVelocityLimitRaw(qint32 limitRaw);
     void applyVelocityRaw(qint32 rawVelocity);
+    void startAutoCalibrationFromButton(qint32 rawVelocity);
     void applyPositionToEnd(int directionSign);
     void readRunStatusSnapshot(const QString &tag);
     void emergencyStop();
@@ -230,6 +231,9 @@ private:
     void startAutoEndToEndCalibration(qint32 firstVelocityRaw);
     void startAutoSecondLeg();
     void finishAutoEndToEndCalibration();
+    QString calibrationFilePath() const;
+    void loadCalibrationFromFile();
+    void saveCalibrationToFile(qint64 endToEndCounts);
     void updateAutoTorqueLearnDuringSample(const Tmc6460QtInterface::RunStatus &status);
     qint16 estimateHoldTorqueLimitFromStatus(const Tmc6460QtInterface::RunStatus &status, qint16 movingMaxAbsRaw) const;
     qint16 clampHoldTorqueLimit(qint32 raw) const;

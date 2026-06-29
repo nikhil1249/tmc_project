@@ -176,6 +176,8 @@ void MainWindow::setupWorkerThread()
             worker, &MotorWorker::applyVelocityLimitRaw, Qt::QueuedConnection);
     connect(this, &MainWindow::workerApplyVelocityRaw,
             worker, &MotorWorker::applyVelocityRaw, Qt::QueuedConnection);
+    connect(this, &MainWindow::workerStartAutoCalibration,
+            worker, &MotorWorker::startAutoCalibrationFromButton, Qt::QueuedConnection);
     connect(this, &MainWindow::workerEmergencyStop,
             worker, &MotorWorker::emergencyStop, Qt::QueuedConnection);
     connect(this, &MainWindow::workerShutdown,
@@ -200,6 +202,7 @@ void MainWindow::setupWorkerThread()
 void MainWindow::setupConnections()
 {
     connect(ui->connectButton, &QPushButton::clicked, this, &MainWindow::connectAndInitialize);
+    connect(ui->calibrationButton, &QPushButton::clicked, this, &MainWindow::onCalibrationClicked);
     connect(ui->readRunStatusButton, &QPushButton::clicked, this, &MainWindow::onReadRunStatusClicked);
 
     connect(ui->torqueSlider, &QSlider::valueChanged, this, &MainWindow::onTorqueSliderValueChanged);
@@ -534,6 +537,18 @@ void MainWindow::scheduleVelocityCommand(int displayVelocity)
     velocityCommandTimer.start(COMMAND_DEBOUNCE_MS);
 }
 
+void MainWindow::onCalibrationClicked()
+{
+    clearError();
+
+    const qint32 calibrationVelocityRaw = DEFAULT_AUTO_TORQUE_LEARN_VELOCITY_RAW;
+
+    appendLog(QStringLiteral("Calibration requested by button. Auto-run velocity raw=%1. Ensure load is mechanically safe before starting.")
+              .arg(calibrationVelocityRaw));
+
+    emit workerStartAutoCalibration(calibrationVelocityRaw);
+}
+
 void MainWindow::sendPendingTorqueCommand()
 {
     logAction(QString("Apply torque %1").arg(pendingTorque));
@@ -831,6 +846,7 @@ void MainWindow::setConnectedUi(bool connected)
     {
         ui->readRunStatusButton->setEnabled(connected);
     }
+    ui->calibrationButton->setEnabled(connected);
     ui->estopButton->setEnabled(connected);
 
     if (connected)

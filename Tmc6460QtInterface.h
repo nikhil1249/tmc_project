@@ -178,7 +178,7 @@ private:
     static constexpr qint32 PYTHON_CONST_VELOCITY_RAW = 4000000;
     static constexpr qint32 MAX_ALLOWED_VELOCITY_RAW  = 10000000;
     static constexpr qint32 MAX_ALLOWED_TORQUE_RAW    = 3000;
-    static constexpr qint16 DEFAULT_FLUX_LIMIT_RAW = 1000;
+    static constexpr qint16 DEFAULT_FLUX_LIMIT_RAW = 3000;
 
     // GUI current conversion. TMC6460 FOC torque actual is a signed raw current-axis value.
     // Keep this as a project calibration constant because the exact mA/raw depends on

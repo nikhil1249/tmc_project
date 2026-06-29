@@ -34,8 +34,9 @@
        <item row="0" column="1"><widget class="QLineEdit" name="portEdit"><property name="text"><string>COM6</string></property><property name="maximumWidth"><number>160</number></property></widget></item>
        <item row="0" column="2"><widget class="QPushButton" name="connectButton"><property name="minimumWidth"><number>190</number></property><property name="text"><string>Connect + Initialize</string></property></widget></item>
        <item row="0" column="3"><widget class="QPushButton" name="readRunStatusButton"><property name="minimumWidth"><number>150</number></property><property name="toolTip"><string>Log one full run-status snapshot for 0/90 degree calibration.</string></property><property name="text"><string>Read Run Status</string></property></widget></item>
-       <item row="0" column="4"><spacer name="connectionSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property></spacer></item>
-       <item row="0" column="5"><widget class="QPushButton" name="estopButton"><property name="minimumSize"><size><width>210</width><height>70</height></size></property><property name="text"><string>E-STOP</string></property></widget></item>
+       <item row="0" column="4"><widget class="QPushButton" name="calibrationButton"><property name="minimumWidth"><number>170</number></property><property name="toolTip"><string>Run automatic end-to-end calibration at 4000000 raw velocity and save learned hold torque/flux limit to file.</string></property><property name="text"><string>Start Calibration</string></property></widget></item>
+       <item row="0" column="5"><spacer name="connectionSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property></spacer></item>
+       <item row="0" column="6"><widget class="QPushButton" name="estopButton"><property name="minimumSize"><size><width>210</width><height>70</height></size></property><property name="text"><string>E-STOP</string></property></widget></item>
       </layout>
      </widget>
     </item>

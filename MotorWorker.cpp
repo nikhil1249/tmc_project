@@ -2,6 +2,9 @@
 
 #include <QtGlobal>
 #include <QDateTime>
+#include <QCoreApplication>
+#include <QDir>
+#include <QSettings>
 
 MotorWorker::MotorWorker(QObject *parent)
     : QObject(parent)
@@ -72,6 +75,8 @@ void MotorWorker::connectAndInitialize(const QString &portName, int baudRate)
         return;
     }
 
+    loadCalibrationFromFile();
+
     emit connected(true, chipId, QStringLiteral("Connected and initialized"));
 
 #if TMC6460_ENABLE_AUTO_TORQUE_LEARN_ON_INIT
@@ -80,6 +85,28 @@ void MotorWorker::connectAndInitialize(const QString &portName, int baudRate)
     QTimer::singleShot(200, this, [this]() {
         startAutoEndToEndCalibration(DEFAULT_AUTO_TORQUE_LEARN_VELOCITY_RAW);
     });
+#endif
+}
+
+void MotorWorker::startAutoCalibrationFromButton(qint32 rawVelocity)
+{
+#if TMC6460_ENABLE_AUTO_END_TO_END_CALIBRATION
+    ensureInterface();
+
+    if (tmc == nullptr || !tmc->isOpen())
+    {
+        emit commandDone(QStringLiteral("AUTO_CAL_START_BUTTON"), false);
+        emit errorChanged(QStringLiteral("Connect and initialize before calibration."));
+        return;
+    }
+
+    emit logMessage(QStringLiteral("CALIBRATION_BUTTON: starting auto torque/end calibration at raw velocity=%1")
+                    .arg(rawVelocity));
+    startAutoEndToEndCalibration(rawVelocity);
+#else
+    Q_UNUSED(rawVelocity)
+    emit commandDone(QStringLiteral("AUTO_CAL_DISABLED"), false);
+    emit errorChanged(QStringLiteral("Auto end-to-end calibration is disabled by macro."));
 #endif
 }
 
@@ -180,7 +207,7 @@ void MotorWorker::applyVelocityTorqueLimitRaw(int torqueLimitRaw)
 {
     ensureInterface();
 
-    const int limitedTorqueLimit = qBound<int>(MIN_VELOCITY_TORQUE_LIMIT_RAW, torqueLimitRaw, MAX_ALLOWED_TORQUE_RAW);
+    const int limitedTorqueLimit = qBound<int>(MIN_VELOCITY_TORQUE_LIMIT_RAW, torqueLimitRaw, MAX_VELOCITY_TORQUE_LIMIT_RAW);
 
     if (limitedTorqueLimit != torqueLimitRaw)
     {
@@ -759,6 +786,8 @@ void MotorWorker::finishAutoEndToEndCalibration()
         tmc->safeLoadStopHold(learnedHoldTorqueFluxLimitRaw);
     }
 
+    saveCalibrationToFile(endToEndCountsFromEndPositions);
+
     emit logMessage(QStringLiteral("AUTO_TORQUE_LEARN_COMPLETE: firstCommand=%1, firstStart=%2, firstEnd=%3, secondStart=%4, secondEnd=%5, firstTravel=%6, secondTravel=%7, endToEndCounts=%8")
                     .arg(autoCalibrationFirstCommandDirection > 0 ? QStringLiteral("CW_POSITIVE") : QStringLiteral("CCW_NEGATIVE"))
                     .arg(hex32(autoCalibrationFirstStartPosition))
@@ -785,6 +814,81 @@ void MotorWorker::finishAutoEndToEndCalibration()
     emit stallStateChanged(true, QStringLiteral("AUTO CAL COMPLETE"));
     resetAutoCalibrationState();
 #endif
+}
+
+
+QString MotorWorker::calibrationFilePath() const
+{
+    const QString dirPath = QCoreApplication::applicationDirPath() + QStringLiteral("/calibration");
+    QDir().mkpath(dirPath);
+    return dirPath + QStringLiteral("/") + QStringLiteral(TMC6460_CALIBRATION_FILE_NAME);
+}
+
+void MotorWorker::loadCalibrationFromFile()
+{
+    const QString path = calibrationFilePath();
+    QSettings settings(path, QSettings::IniFormat);
+
+    const bool valid = settings.value(QStringLiteral("Calibration/valid"), false).toBool();
+    if (!valid)
+    {
+        learnedHoldTorqueFluxLimitRaw = DEFAULT_VELOCITY_TORQUE_LIMIT_RAW;
+        emit logMessage(QStringLiteral("CAL_FILE_LOAD: no valid calibration file found at %1. Using default hold torque/flux=%2")
+                        .arg(path)
+                        .arg(learnedHoldTorqueFluxLimitRaw));
+        if (tmc != nullptr && tmc->isOpen())
+        {
+            tmc->setVelocityTorqueFluxLimit(learnedHoldTorqueFluxLimitRaw);
+        }
+        return;
+    }
+
+    autoCalibrationFirstEndPosition = settings.value(QStringLiteral("Calibration/firstEndPosition"), 0).toUInt();
+    autoCalibrationSecondEndPosition = settings.value(QStringLiteral("Calibration/secondEndPosition"), 0).toUInt();
+    autoCalibrationFirstTravelCounts = settings.value(QStringLiteral("Calibration/firstTravelCounts"), 0).toLongLong();
+    autoCalibrationSecondTravelCounts = settings.value(QStringLiteral("Calibration/secondTravelCounts"), 0).toLongLong();
+    autoFirstHoldTorqueRequiredRaw = static_cast<qint16>(settings.value(QStringLiteral("Calibration/firstHoldTorqueFluxLimit"), DEFAULT_VELOCITY_TORQUE_LIMIT_RAW).toInt());
+    autoSecondHoldTorqueRequiredRaw = static_cast<qint16>(settings.value(QStringLiteral("Calibration/secondHoldTorqueFluxLimit"), DEFAULT_VELOCITY_TORQUE_LIMIT_RAW).toInt());
+    learnedHoldTorqueFluxLimitRaw = clampHoldTorqueLimit(settings.value(QStringLiteral("Calibration/learnedHoldTorqueFluxLimit"), DEFAULT_VELOCITY_TORQUE_LIMIT_RAW).toInt());
+
+    emit logMessage(QStringLiteral("CAL_FILE_LOAD: %1 firstEnd=%2 secondEnd=%3 firstHold=%4 secondHold=%5 learnedHold=%6")
+                    .arg(path)
+                    .arg(hex32(autoCalibrationFirstEndPosition))
+                    .arg(hex32(autoCalibrationSecondEndPosition))
+                    .arg(autoFirstHoldTorqueRequiredRaw)
+                    .arg(autoSecondHoldTorqueRequiredRaw)
+                    .arg(learnedHoldTorqueFluxLimitRaw));
+
+    if (tmc != nullptr && tmc->isOpen())
+    {
+        tmc->setVelocityTorqueFluxLimit(learnedHoldTorqueFluxLimitRaw);
+    }
+}
+
+void MotorWorker::saveCalibrationToFile(qint64 endToEndCounts)
+{
+    const QString path = calibrationFilePath();
+    QSettings settings(path, QSettings::IniFormat);
+
+    settings.setValue(QStringLiteral("Calibration/valid"), true);
+    settings.setValue(QStringLiteral("Calibration/timestamp"), QDateTime::currentDateTime().toString(Qt::ISODate));
+    settings.setValue(QStringLiteral("Calibration/velocityRaw"), qAbs(autoCalibrationFirstVelocityRaw));
+    settings.setValue(QStringLiteral("Calibration/firstEndPosition"), autoCalibrationFirstEndPosition);
+    settings.setValue(QStringLiteral("Calibration/secondEndPosition"), autoCalibrationSecondEndPosition);
+    settings.setValue(QStringLiteral("Calibration/firstTravelCounts"), autoCalibrationFirstTravelCounts);
+    settings.setValue(QStringLiteral("Calibration/secondTravelCounts"), autoCalibrationSecondTravelCounts);
+    settings.setValue(QStringLiteral("Calibration/endToEndCounts"), endToEndCounts);
+    settings.setValue(QStringLiteral("Calibration/firstHoldTorqueFluxLimit"), autoFirstHoldTorqueRequiredRaw);
+    settings.setValue(QStringLiteral("Calibration/secondHoldTorqueFluxLimit"), autoSecondHoldTorqueRequiredRaw);
+    settings.setValue(QStringLiteral("Calibration/learnedHoldTorqueFluxLimit"), learnedHoldTorqueFluxLimitRaw);
+    settings.setValue(QStringLiteral("Calibration/torqueModeEnabled"), TMC6460_ENABLE_TORQUE_MODE);
+    settings.setValue(QStringLiteral("Calibration/positionModeEnabled"), TMC6460_ENABLE_POSITION_MODE);
+    settings.sync();
+
+    emit logMessage(QStringLiteral("CAL_FILE_SAVE: %1 learnedHoldTorqueFluxLimit=%2 endToEndCounts=%3")
+                    .arg(path)
+                    .arg(learnedHoldTorqueFluxLimitRaw)
+                    .arg(endToEndCounts));
 }
 
 

@@ -36,6 +36,7 @@ signals:
     void workerApplyVelocityTorqueLimit(int torqueLimitRaw);
     void workerApplyVelocityLimitRaw(qint32 limitRaw);
     void workerApplyVelocityRaw(qint32 rawVelocity);
+    void workerStartAutoCalibration(qint32 rawVelocity);
     void workerEmergencyStop();
     void workerShutdown();
 
@@ -65,6 +66,7 @@ private slots:
     void onVelocityRangeChanged();
 
     void onEstopClicked();
+    void onCalibrationClicked();
     void onReadRunStatusClicked();
     void sendPendingTorqueCommand();
     void sendPendingVelocityCommand();
